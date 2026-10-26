@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gectargets"
+version = "0.1.0"
+description = "Trans-dataset study of FC / lagged-covariance targets and their GEC fits"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "h5py>=3.8",
+    "matplotlib>=3.9",
+    "joblib>=1.3",
+]
+
+[tool.setuptools]
+packages = ["gectargets"]
