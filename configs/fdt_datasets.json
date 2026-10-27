@@ -1,25 +1,25 @@
 {
-  "_comment": "The fdt_eeg datasets. Paths accept $ENV_VARS (e.g. $DATA_ROOT/UCM_MEG/...) so the same file can be used on the cluster.",
-  "results_root": "D:/gec_targets_results",
+  "_comment": "The fdt_eeg datasets. Paths accept $ENV_VARS (e.g. $DATA_DIR/UCM_MEG/...) so the same file can be used on the cluster. $DATA_DIR is set in .env.",
+  "results_root": "$DATA_DIR/gec_targets_results",
   "n_jobs": 8,
 
   "datasets": {
     "UCM_AAL": {
       "_comment": "Source-reconstructed MEG, AAL. n_epochs = 38: fixed number of epochs per subject (fdt_eeg gec_diagnostics a3).",
       "loader": "bids_epochs",
-      "root": "D:/UCM_MEG/bids_extended-AD",
+      "root": "$DATA_DIR/UCM_MEG/bids_extended-AD",
       "epochs_dir": "epochs_AAL_SFREQ_250_EPLEN_4",
       "modality": "meg",
       "session": "resteyesclosed",
       "band": "alpha",
       "atlas": "AAL",
       "n_epochs": 38,
-      "sc_path": "D:/ADNI_parcellated_data/connectomes/Skoch_et_al_2022/SC_AAL_avg_88HC.csv"
+      "sc_path": "$DATA_DIR/ADNI_parcellated_data/connectomes/Skoch_et_al_2022/SC_AAL_avg_88HC.csv"
     },
     "UniRoma": {
       "_comment": "Channel-space EEG (30 channels): no SC, seeded random initialisation.",
       "loader": "bids_epochs",
-      "root": "~/Desktop/EEG_datasets/EEG_UniRoma_FDT/BIDS",
+      "root": "$DATA_DIR/EEG_UniRoma_FDT/BIDS",
       "epochs_dir": "epochs_SFREQ_256_EPLEN_1_own",
       "modality": "eeg",
       "session": "eyesclosed",
@@ -32,24 +32,13 @@
     "ADNI_Schaefer400": {
       "_comment": "fMRI, already band-passed in preprocessing: band null. One 197-TR epoch per subject (split in time for split-half).",
       "loader": "bids_epochs",
-      "root": "D:/ADNI Datasets/ADNI_BIDS/derivatives/fdt_project",
+      "root": "$DATA_DIR/ADNI Datasets/ADNI_BIDS/derivatives/fdt_project",
       "epochs_dir": "epochs_Schaefer400",
       "modality": "bold",
       "session": "M000",
       "band": null,
       "atlas": "Schaefer400",
-      "sc_path": "D:/ADNI_parcellated_data/connectomes/HCP/SC_schaefer400_tian_S3_7Networks_32fold_groupconnectome_3T_MNI152NLin2009cAsym_2mm.csv"
-    },
-    "ADNI_Schaefer100": {
-      "_comment": "TODO: epochs_Schaefer100 does not exist yet on D:/ (only epochs_Schaefer400).",
-      "loader": "bids_epochs",
-      "root": "D:/ADNI Datasets/ADNI_BIDS/derivatives/fdt_project",
-      "epochs_dir": "epochs_Schaefer100",
-      "modality": "bold",
-      "session": "M000",
-      "band": null,
-      "atlas": "Schaefer100",
-      "sc_path": "D:/ADNI_parcellated_data/connectomes/HCP/SC_schaefer100_tian_S1_7Networks_32fold_groupconnectome_3T_MNI152NLin2009cAsym_2mm.csv"
+      "sc_path": "$DATA_DIR/ADNI_parcellated_data/connectomes/HCP/SC_schaefer400_tian_S3_7Networks_32fold_groupconnectome_3T_MNI152NLin2009cAsym_2mm.csv"
     }
   },
 

@@ -1,5 +1,6 @@
 __pycache__/
 *.egg-info/
+.env
 .idea/
 .ipynb_checkpoints/
 demo_data/

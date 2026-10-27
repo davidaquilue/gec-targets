@@ -13,6 +13,10 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 PREPROCESSING_KEYS = ("envelope", "orthogonalize")
 # Settings of the fitting loop (everything else in a model block is a model
 # parameter, passed to the model class)
