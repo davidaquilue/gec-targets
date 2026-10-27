@@ -114,9 +114,14 @@ def halves(x):
 
 
 def subject_targets(x, tau):
-    """FC and FS (epoch means) for all epochs and for the two halves."""
-    out = {"n_epochs": len(x)}
-    for name, part in zip(("", "_odd", "_even"), (x, *halves(x))):
+    """FC and FS (epoch means) for all epochs and for the two halves, plus
+    the per-epoch matrices "fc_epochs", "fs_epochs" (n_epochs, N, N) when
+    there is more than one epoch."""
+    fc, fs = fc_epochs(x), fs_epochs(x, tau)
+    out = {"n_epochs": len(x), "fc": fc.mean(axis=0), "fs": fs.mean(axis=0)}
+    if len(x) > 1:
+        out.update(fc_epochs=fc, fs_epochs=fs)
+    for name, part in zip(("_odd", "_even"), halves(x)):
         out[f"fc{name}"] = fc_epochs(part).mean(axis=0)
         out[f"fs{name}"] = fs_epochs(part, tau).mean(axis=0)
     return out

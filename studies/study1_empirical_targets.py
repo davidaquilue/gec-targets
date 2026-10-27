@@ -22,7 +22,8 @@ import pandas as pd
 from gectargets.analysis import (TARGETS, edge_vectors, target_matrices,
                                  offdiag, between_subject, corr_matrix,
                                  identifiability, loo_group_corr,
-                                 signflip_null)
+                                 signflip_null, snr_split_half, snr_epochs,
+                                 epoch_tstats, fdr_fraction, epoch_signflip)
 from gectargets.config import load_config, study_dir, target_variants, \
     variant_name
 from gectargets.plotting import TARGET_COLORS, GRAY, show_matrix, save
@@ -178,10 +179,117 @@ fig.tight_layout()
 save(fig, out / "5_split_half_identifiability.png")
 
 # %% [markdown]
-# ## 6. Summary across datasets
+# ## 6. Signal to noise of each subject's targets
+# SNR = signal power / noise power of the subject's full-data estimate, with
+# power the mean square over edges (uncentred: for FS_A, 0 is the reversible
+# reference) and signal = total - noise (< 0: no detectable signal).
+# * split half (every dataset): (odd - even) / 2 holds only noise, and its
+#   mean square is the noise power of (odd + even) / 2.
+# * epochs (subjects with more than one epoch, so not fMRI): noise variance
+#   of each edge's epoch mean = var over epochs / K. For FS_A also a t-test
+#   of every edge (fraction of edges significant, Benjamini-Hochberg 5 %) and
+#   a sign-flip test of the whole matrix: time-reversing an epoch flips its
+#   FS_A, so under reversibility each epoch's sign is arbitrary.
+# Both assume independent noise between halves / epochs.
+
+# %%
+snr_rows, tmaps = [], {}
+for name, d in data.items():
+    has_epochs = "fs_epochs" in d
+    if not has_epochs and d["n_epochs"].max() > 1:
+        print(f"{name}: no per-epoch targets (computed before they were "
+              f"stored); recompute the targets for the epoch SNR")
+    odd = edge_vectors(d["fc_odd"], d["fs_odd"])
+    even = edge_vectors(d["fc_even"], d["fs_even"])
+    split = {key: snr_split_half(odd[key], even[key]) for key in TARGETS}
+    for i, (s, g) in enumerate(zip(d["subjects"], d["groups"])):
+        base = {"data": name, "subject": s, "group": g,
+                "n_epochs": d["n_epochs"][i]}
+        for key in TARGETS:
+            snr_rows.append({**base, "target": key, "method": "split_half",
+                             **{k: v[i] for k, v in split[key].items()}})
+        if not has_epochs or d["n_epochs"][i] < 2:
+            continue
+        epochs = edge_vectors(d["fc_epochs"][i], d["fs_epochs"][i])
+        for key in TARGETS:
+            row = {**base, "target": key, "method": "epochs",
+                   **snr_epochs(epochs[key])}
+            if key == "FS_A":
+                t, p = epoch_tstats(epochs[key])
+                row.update(frac_edges_fdr=fdr_fraction(p),
+                           p_signflip=epoch_signflip(epochs[key], N_PERM))
+                tmaps.setdefault(name, {})[s] = t
+            snr_rows.append(row)
+snr = pd.DataFrame(snr_rows)
+snr.to_csv(out / "6_snr.csv", index=False)
+
+for row in summary:
+    s = snr[(snr.data == row["data"]) & (snr.target == row["target"])]
+    for method in ("split_half", "epochs"):
+        row[f"snr_{method}_median"] = s.loc[s.method == method, "snr"].median()
+    if row["target"] == "FS_A":
+        e = s[s.method == "epochs"]
+        row["frac_subjects_signflip_05"] = (e.p_signflip < 0.05).mean()
+        row["frac_edges_fdr_median"] = e.frac_edges_fdr.median()
+
+# SNR per target: one row per dataset, split half | epochs
+fig, axes = plt.subplots(len(data), 2, figsize=(10, 0.8 + 1.8 * len(data)),
+                         squeeze=False)
+for row, name in zip(axes, data):
+    for ax, method in zip(row, ("split_half", "epochs")):
+        ax.set_title(f"{name}: {method.replace('_', ' ')}")
+        s = snr[(snr.data == name) & (snr.method == method)]
+        if s.empty:
+            ax.text(0.5, 0.5, "single epoch: split half only", color=GRAY,
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set(xticks=[], yticks=[])
+            continue
+        bp = ax.boxplot([s.loc[s.target == key, "snr"] for key in TARGETS],
+                        vert=False, tick_labels=TARGETS, widths=0.5,
+                        patch_artist=True, medianprops={"color": "#52514e"})
+        for box, key in zip(bp["boxes"], TARGETS):
+            box.set(facecolor=TARGET_COLORS[key], alpha=0.6)
+        ax.axvline(0, color=GRAY, linewidth=1)
+        ax.set_xscale("symlog", linthresh=0.1)
+        ax.invert_yaxis()
+        ax.set(xlabel="SNR (signal / noise power)")
+fig.tight_layout()
+save(fig, out / "6_snr.png")
+
+multi = [n for n in data if ((snr.data == n) & (snr.method == "epochs")).any()]
+if multi:
+    # FS_A: epoch vs split-half SNR (cross-check), and the per-edge t of the
+    # subject with the median epoch SNR
+    fig, axes = plt.subplots(2, len(multi), figsize=(4.2 * len(multi), 7),
+                             squeeze=False)
+    for col, name in zip(axes.T, multi):
+        fs_a = snr[(snr.data == name) & (snr.target == "FS_A")]
+        w = fs_a.pivot(index="subject", columns="method",
+                       values="snr").dropna()
+        col[0].scatter(w.split_half, w.epochs, s=16, alpha=0.7,
+                       color=TARGET_COLORS["FS_A"])
+        lim = [min(w.min().min(), 0), w.max().max()]
+        col[0].plot(lim, lim, color=GRAY, linewidth=1, linestyle="--")
+        col[0].set(title=name, xlabel="FS_A SNR, split half",
+                   ylabel="FS_A SNR, epochs")
+
+        e = fs_a[fs_a.method == "epochs"].sort_values("snr")
+        ex = e.iloc[len(e) // 2]
+        n = data[name]["fc"].shape[-1]
+        T = np.zeros((n, n))
+        T[np.triu_indices(n, k=1)] = tmaps[name][ex.subject]
+        show_matrix(col[1], T - T.T,
+                    f"{ex.subject} (median SNR {ex.snr:.2f}): FS_A t\n"
+                    f"{ex.frac_edges_fdr:.0%} of edges FDR 5 %, "
+                    f"sign-flip p {ex.p_signflip:.3f}")
+    fig.tight_layout()
+    save(fig, out / "6_snr_fs_a_epochs.png")
+
+# %% [markdown]
+# ## 7. Summary across datasets
 
 # %%
 summary = pd.DataFrame(summary)
-summary.to_csv(out / "6_summary.csv", index=False)
+summary.to_csv(out / "7_summary.csv", index=False)
 with pd.option_context("display.width", 200, "display.precision", 3):
     print(summary.to_string(index=False))

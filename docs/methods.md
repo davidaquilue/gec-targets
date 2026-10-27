@@ -29,6 +29,9 @@ and signal variant.
 **Split halves**: the same targets from odd and from even epochs; with a
 single epoch (fMRI), from the first and the second half of the run.
 
+**Per-epoch matrices**: with more than one epoch, FC and FS of every epoch
+are also stored (`fc_epochs`, `fs_epochs`, (n_epochs, N, N)).
+
 ## 2. Models (`gectargets/models.py`)
 
 All models are linear, `dx/dt = A x + sigma xi`. With S the stationary
@@ -93,6 +96,21 @@ are logged (`history_*` in the subject's `.npz`).
   corr(odd half of s, even half of s), `i_others` = mean over s != t,
   `i_diff = i_self - i_others`, accuracy = fraction of halves whose best match
   is the same subject.
+* **Signal to noise of a subject's targets** (study 1, section 6). Power =
+  mean square over edges, uncentred (for FS_A, 0 is the reversible
+  reference); SNR = (total power - noise power) / noise power of the
+  full-data estimate, < 0 when no signal is detectable.
+  * split half (`snr_split_half`): noise power of (odd + even) / 2 =
+    mean((odd - even)^2) / 4, since the difference holds no signal;
+  * epochs (`snr_epochs`, subjects with > 1 epoch, so not fMRI): noise power
+    = mean over edges of var_epochs / K. For FS_A also a one-sample t-test
+    of every edge against 0 (fraction of edges passing Benjamini-Hochberg at
+    5 %) and a sign-flip test of the total power (`epoch_signflip`): time
+    reversal flips an epoch's FS_A exactly, so under reversibility each
+    epoch's sign is arbitrary.
+
+  Both assume independent noise between halves / epochs; correlated
+  neighbouring epochs make the noise look smaller than it is.
 * **GEC similarity**: on the support of the initial matrix only (the
   entries outside it are 0 for every subject). Reported with `r_to_sc`, the
   similarity of each GEC to the SC it started from, since a shared SC makes

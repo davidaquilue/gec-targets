@@ -12,6 +12,7 @@ Functions accept a matrix (N, N) or a stack (..., N, N).
 """
 import numpy as np
 from scipy.linalg import solve_continuous_lyapunov
+from scipy.stats import ttest_1samp
 
 TARGETS = ("FC", "FS", "FS_S", "FS_A")
 
@@ -107,6 +108,61 @@ def signflip_null(X, n_perm=1000, seed=0):
     rng = np.random.default_rng(seed)
     return np.array([loo_group_corr(X, rng.choice([-1.0, 1.0], len(X))).mean()
                      for _ in range(n_perm)])
+
+
+# ----------------------------------------------- signal to noise (power)
+# Power = mean square over edges, uncentred: for FS_A, 0 is the reversible
+# reference. Signal power = total power of the estimate - its noise power;
+# it can come out < 0 when there is no detectable signal.
+def _power_snr(estimate, noise):
+    signal = np.mean(estimate ** 2, axis=-1) - noise
+    return {"signal": signal, "noise": noise, "snr": signal / noise}
+
+
+def snr_split_half(X_odd, X_even):
+    """SNR of (odd + even) / 2, X_*: (..., n_edges).
+
+    Each half = signal + independent noise of equal variance: odd - even is
+    noise only, and the noise variance of the mean of the halves is
+    mean((odd - even)^2) / 4.
+    """
+    noise = np.mean((X_odd - X_even) ** 2, axis=-1) / 4
+    return _power_snr((X_odd + X_even) / 2, noise)
+
+
+def snr_epochs(E):
+    """SNR of the epoch mean, E: (n_epochs, n_edges), assuming independent
+    epochs: the noise variance of the mean of edge k is var_e(E_k) / K."""
+    noise = np.mean(E.var(axis=0, ddof=1) / len(E))
+    return _power_snr(E.mean(axis=0), noise)
+
+
+def epoch_tstats(E):
+    """One-sample t and two-sided p of every edge's epoch mean against 0."""
+    res = ttest_1samp(E, 0.0, axis=0)
+    return res.statistic, res.pvalue
+
+
+def fdr_fraction(p, q=0.05):
+    """Fraction of the tests rejected by Benjamini-Hochberg at level q."""
+    p = np.sort(p)
+    passed = np.flatnonzero(p <= q * np.arange(1, len(p) + 1) / len(p))
+    return (passed[-1] + 1) / len(p) if passed.size else 0.0
+
+
+def epoch_signflip(E, n_perm=1000, seed=0):
+    """p-value of the total power of the epoch mean of FS_A under random
+    sign flips of whole epochs.
+
+    Time-reversing an epoch flips the sign of its FS_A exactly, so for a
+    reversible process with independent epochs every sign pattern is
+    equally likely. Not meaningful for FC / FS_S (unchanged by reversal).
+    """
+    rng = np.random.default_rng(seed)
+    signs = rng.choice([-1.0, 1.0], (n_perm, len(E)))
+    null = np.mean((signs @ E / len(E)) ** 2, axis=1)
+    observed = np.mean(E.mean(axis=0) ** 2)
+    return (1 + (null >= observed).sum()) / (n_perm + 1)
 
 
 # --------------------------------------------------------------------- GEC
