@@ -29,9 +29,9 @@ from gectargets.fitting import load_matrix
 from gectargets.plotting import color_for, save
 from gectargets.results import load_fits, load_meta
 
-CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/demo.json"
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 SELECT_BY = "r_fs"   # pick, per dataset and model, the task with the best mean
-CHOSEN = {}          # or fix them: {("demo", "network"): task_id, ...}
+CHOSEN = {}          # or fix them: {("UCM_AAL", "network"): task_id, ...}
 KEYS = {"FC": "fc", "FS": "fs", "FS_S": "fs_s", "FS_A": "fs_a"}
 
 cfg = load_config(CONFIG)

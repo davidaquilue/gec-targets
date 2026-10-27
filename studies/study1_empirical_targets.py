@@ -28,7 +28,7 @@ from gectargets.config import load_config, study_dir, target_variants, \
 from gectargets.plotting import TARGET_COLORS, GRAY, show_matrix, save
 from gectargets.results import load_targets
 
-CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/demo.json"
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 GROUPS = None        # e.g. ["HC"] to restrict every analysis to one group
 N_PERM = 1000        # sign flips for the FS_A null
 

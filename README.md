@@ -27,19 +27,22 @@ conda create -n gectargets python=3.12 -y && conda activate gectargets
 pip install -e .
 ```
 
-## Quick start (synthetic data, ~minutes on a laptop)
+## Quick start
+
+The paths in `configs/fdt_datasets.json` start with `$DATA_DIR`: set it in a
+`.env` file at the repository root (e.g. `DATA_DIR=D:\`) or in the
+environment.
 
 ```bash
-python examples/make_synthetic_dataset.py demo_data      # 20 synthetic subjects
-python -m gectargets tasks   configs/demo.json           # what will be fitted
-python -m gectargets targets configs/demo.json           # 1. empirical targets
-python -m gectargets fit     configs/demo.json --all     # 2. GEC fits
-python studies/study1_empirical_targets.py configs/demo.json   # 3. analyses
-python studies/study2_training_dynamics.py configs/demo.json
-python studies/study3_model_comparison.py  configs/demo.json
+python -m gectargets tasks   configs/fdt_datasets.json           # what will be fitted
+python -m gectargets targets configs/fdt_datasets.json           # 1. empirical targets
+python -m gectargets fit     configs/fdt_datasets.json --all     # 2. GEC fits
+python studies/study1_empirical_targets.py configs/fdt_datasets.json   # 3. analyses
+python studies/study2_training_dynamics.py configs/fdt_datasets.json
+python studies/study3_model_comparison.py  configs/fdt_datasets.json
 ```
 
-Figures and tables are written to `results_demo/studies/study{1,2,3}/`. The
+Figures and tables are written to `<results_root>/studies/study{1,2,3}/`. The
 study scripts are split into `# %%` cells: open them in PyCharm, VS Code or
 Jupyter (jupytext) to run them step by step.
 
@@ -55,8 +58,8 @@ Every step is restartable: existing targets and subject fits are skipped.
 
 ### The config
 
-See `configs/demo.json` (synthetic) and `configs/fdt_datasets.json` (UCM MEG,
-UniRoma EEG, ADNI fMRI). Keys starting with `_` are comments. Paths are
+See `configs/fdt_datasets.json` (UCM MEG, UniRoma EEG, ADNI fMRI). Keys
+starting with `_` are comments. Paths are
 relative to the config file and may contain `$ENV_VARS`.
 
 | Block | Content |

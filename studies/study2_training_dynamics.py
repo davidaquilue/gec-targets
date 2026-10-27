@@ -27,7 +27,7 @@ from gectargets.fitting import START_ERROR, load_matrix
 from gectargets.plotting import TARGET_COLORS, GRAY, color_for, save
 from gectargets.results import load_fits
 
-CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/demo.json"
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 X_PARAM, LINE_PARAM = "eps_fs", "eps_fc"  # section 1: x axis, one line each
 TRAJECTORY_TASKS = None   # task ids for section 2; None: the "none" runs
 GAIN_FRACTION = 0.95      # section 3: "converged" = this fraction of the gain

@@ -50,8 +50,6 @@ for sub, group, x in my_subjects:               # x: (n_epochs, n_nodes, n_times
 pd.DataFrame(rows).to_csv(root / "participants.tsv", sep="\t", index=False)
 ```
 
-`examples/make_synthetic_dataset.py` does exactly this with simulated data.
-
 A continuous recording is one epoch: `x[None]`, shape `(1, n_nodes, n_times)`.
 Split-half analyses then compare the first and the second half of the
 recording.
