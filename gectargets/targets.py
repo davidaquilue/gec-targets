@@ -47,7 +47,10 @@ def symmetric_orthogonalize(x):
     pooled = x.transpose(1, 0, 2).reshape(n_nodes, -1)
     pooled = pooled - pooled.mean(axis=1, keepdims=True)
     lam, V = np.linalg.eigh(pooled @ pooled.T / pooled.shape[1])
-    inv_sqrt = np.where(lam > np.finfo(float).eps, 1 / np.sqrt(np.abs(lam)), 0)
+    # Cutoff relative to the largest eigenvalue: an absolute one depends on
+    # the data's units (EEG in volts has eigenvalues down to ~1e-16).
+    threshold = lam[-1] * n_nodes * np.finfo(float).eps
+    inv_sqrt = np.where(lam > threshold, 1 / np.sqrt(np.abs(lam)), 0)
     y = np.einsum("ij,ejt->eit", (V * inv_sqrt) @ V.T, x)
     sign = np.sign(np.einsum("eit,eit->i", x, y))
     return y * np.where(sign == 0, 1, sign)[None, :, None]
