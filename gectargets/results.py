@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from .config import expand_tasks, fit_dir, targets_dir
+from .config import expand_tasks, fit_dir, tau_scan_dir, targets_dir
 
 EPOCH_KEYS = ("fc_epochs", "fs_epochs")
 
@@ -15,31 +15,49 @@ def load_meta(cfg, dataset, variant):
         return json.load(f)
 
 
-def load_targets(cfg, dataset, variant):
-    """Targets of all subjects: dict of (n_subjects, N, N) arrays ("fc",
-    "fs", "fc_odd", ...), plus "n_epochs", "subjects", "groups", "meta".
+def _stack_subjects(directory, subjects, dtype=None):
+    """Every array of the subjects' .npz files, stacked over subjects.
 
     "fc_epochs", "fs_epochs" (if any subject has them): object arrays of one
     (n_epochs, N, N) array per subject, None for single-epoch subjects."""
-    t_dir = targets_dir(cfg, dataset, variant)
-    meta = load_meta(cfg, dataset, variant)
     data, epochs = {}, {k: [] for k in EPOCH_KEYS}
-    for s in meta["subjects"]:
-        with np.load(t_dir / f"{s}.npz") as z:
+    for s in subjects:
+        with np.load(directory / f"{s}.npz") as z:
             for k in z.files:
                 if k not in EPOCH_KEYS:
                     data.setdefault(k, []).append(z[k])
             for k in EPOCH_KEYS:
-                epochs[k].append(z[k] if k in z.files else None)
-    out = {k: np.array(v) for k, v in data.items()}
+                epochs[k].append(np.asarray(z[k], dtype=dtype)
+                                 if k in z.files else None)
+    out = {k: np.array(v, dtype=dtype) for k, v in data.items()}
     for k, v in epochs.items():
         if any(e is not None for e in v):
             out[k] = np.empty(len(v), dtype=object)
             for i, e in enumerate(v):
                 out[k][i] = e
+    return out
+
+
+def load_targets(cfg, dataset, variant):
+    """Targets of all subjects: dict of (n_subjects, N, N) arrays ("fc",
+    "fs", "fc_odd", ...), the per-epoch "fc_epochs", "fs_epochs" (see
+    _stack_subjects), plus "n_epochs", "subjects", "groups", "meta"."""
+    meta = load_meta(cfg, dataset, variant)
+    out = _stack_subjects(targets_dir(cfg, dataset, variant),
+                          meta["subjects"])
     out.update(subjects=meta["subjects"], groups=np.array(meta["groups"]),
                meta=meta)
     return out
+
+
+def load_tau_scan(cfg, dataset, variant, tau):
+    """FS at lag *tau* from the tau scan (targets.compute_tau_scan): dict of
+    (n_subjects, N, N) arrays "fs", "fs_odd", "fs_even" and the per-epoch
+    "fs_epochs" (see _stack_subjects), subjects in the order of the targets'
+    meta.json."""
+    return _stack_subjects(tau_scan_dir(cfg, dataset, variant, tau),
+                           load_meta(cfg, dataset, variant)["subjects"],
+                           dtype=float)
 
 
 def load_fits(cfg, task):

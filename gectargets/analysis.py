@@ -165,6 +165,74 @@ def epoch_signflip(E, n_perm=1000, seed=0):
     return (1 + (null >= observed).sum()) / (n_perm + 1)
 
 
+# ------------------------------------------- metrics for scans (e.g. tau)
+SNR_METRICS = {
+    "snr": "signal / noise power of each subject, split halves "
+           "(snr_split_half)",
+    "snr_epochs": "signal / noise power of each subject, epochs "
+                  "(snr_epochs; multi-epoch data)",
+    "fdr_edges": "fraction of edges with epoch mean != 0, BH 5 %, of each "
+                 "subject (FS_A; multi-epoch data)",
+    "epoch_signflip": "fraction of subjects whose FS_A beats the epoch "
+                      "sign-flip null at p < 0.05 (multi-epoch data)",
+    "within_r": "corr(odd half, even half) of each subject",
+    "within_snr": "signal / noise variance (centred) of the full data "
+                  "implied by the mean split-half r: 2 r / (1 - r)",
+    "between_r": "corr between every pair of subjects",
+    "i_diff": "mean within r - mean between r (split halves)",
+    "accuracy": "split-half identification accuracy",
+    "loo_r": "corr(subject, mean of the others) of each subject",
+    "signflip_z": "mean loo_r against the subject sign-flip null, in null "
+                  "SDs (FS_A only)",
+}
+EPOCH_METRICS = ("snr_epochs", "fdr_edges", "epoch_signflip")
+
+
+def snr_metric(name, X, X_odd, X_even, target, E=None, n_perm=1000):
+    """Metric *name* of SNR_METRICS for one target.
+
+    X, X_odd, X_even: (n_subjects, n_edges) from all epochs and the two
+    halves; E: per subject, (n_epochs, n_edges) or None (single epoch),
+    needed by EPOCH_METRICS. Returns one value per subject (or subject pair)
+    or a float; NaN where the metric does not apply.
+
+    within_snr: with each half = signal + independent noise of equal size,
+    r = var_s / (var_s + var_half_noise), and the noise of the full data has
+    half the variance of a half's.
+    """
+    if name in EPOCH_METRICS:
+        if E is None or (name != "snr_epochs" and target != "FS_A"):
+            return np.nan
+        if name == "snr_epochs":
+            return np.array([np.nan if e is None else snr_epochs(e)["snr"]
+                             for e in E])
+        if name == "fdr_edges":
+            return np.array([np.nan if e is None else
+                             fdr_fraction(epoch_tstats(e)[1]) for e in E])
+        p = np.array([epoch_signflip(e, n_perm) for e in E if e is not None])
+        return float(np.mean(p < 0.05)) if p.size else np.nan
+    if name == "snr":
+        return snr_split_half(X_odd, X_even)["snr"]
+    if name in ("within_r", "within_snr", "i_diff", "accuracy"):
+        ident = identifiability(X_odd, X_even)
+        if name == "within_r":
+            return ident["within"]
+        if name == "within_snr":
+            r = ident["i_self"]
+            return 2 * r / (1 - r)
+        return ident[name]
+    if name == "between_r":
+        return between_subject(X)
+    if name == "loo_r":
+        return loo_group_corr(X)
+    if name == "signflip_z":
+        if target != "FS_A":
+            return np.nan
+        null = signflip_null(X, n_perm)
+        return float((loo_group_corr(X).mean() - null.mean()) / null.std())
+    raise KeyError(f"Unknown metric '{name}'. Available: {list(SNR_METRICS)}")
+
+
 # --------------------------------------------------------------------- GEC
 def gec_edges(C, mask):
     """Fitted couplings on the support of the initial matrix (off-diagonal).

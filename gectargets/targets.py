@@ -27,8 +27,9 @@ import numpy as np
 from joblib import Parallel, delayed
 from scipy.signal import butter, detrend, hilbert, sosfiltfilt
 
-from .config import targets_dir, variant_name
+from .config import tau_scan_dir, targets_dir, variant_name
 from .loaders import get_loader
+from .results import load_meta
 
 ACF_THRESHOLD = 1 / np.e
 
@@ -206,3 +207,49 @@ def compute_targets(cfg, dataset, prep, n_jobs=1):
         json.dump(meta, f, indent=1)
     print(f"[{dataset}] {len(subjects)} subjects -> {out_dir}")
     return out_dir
+
+
+# ---------------------------------------------------------------- tau scan
+def _subject_tau_scan(loader, subject, band, prep, taus, out_dirs):
+    x = _load(loader, subject, band, prep)
+    if x is None:
+        return None
+    for tau in taus:
+        # float32: the scan is n_taus x the size of the targets
+        fs = fs_epochs(x, tau)
+        out = {"fs": fs.mean(axis=0)}
+        if len(x) > 1:
+            out["fs_epochs"] = fs
+        for name, part in zip(("_odd", "_even"), halves(x)):
+            out[f"fs{name}"] = fs_epochs(part, tau).mean(axis=0)
+        np.savez(out_dirs[tau] / f"{subject}.npz",
+                 **{k: v.astype(np.float32) for k, v in out.items()})
+    return subject
+
+
+def compute_tau_scan(cfg, dataset, prep, taus, n_jobs=1):
+    """FS of all epochs, of the two halves and (with more than one epoch) of
+    every epoch, at every lag in *taus* (samples), for the subjects of the
+    targets (which must exist). One .npz per subject in
+    targets/tau_scan/tau-<tau>/; FC does not depend on tau and is not
+    repeated. Lags already computed for a subject are skipped, so lags
+    can be added later at the cost of the new ones only."""
+    ds_cfg = cfg["datasets"][dataset]
+    variant = variant_name(ds_cfg, prep)
+    subjects = load_meta(cfg, dataset, variant)["subjects"]
+    out_dirs = {int(tau): tau_scan_dir(cfg, dataset, variant, int(tau))
+                for tau in taus}
+    todo = {s: [tau for tau, d in out_dirs.items()
+                if not (d / f"{s}.npz").exists()] for s in subjects}
+    todo = {s: t for s, t in todo.items() if t}
+    if not todo:
+        return
+    for d in out_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    loader = get_loader(ds_cfg)
+    band_name = ds_cfg.get("band")
+    band = cfg["bands"][band_name] if band_name else None
+    print(f"[{dataset}] tau scan: {len(todo)} subjects, lags {sorted(out_dirs)}")
+    Parallel(n_jobs=n_jobs)(
+        delayed(_subject_tau_scan)(loader, s, band, prep, t, out_dirs)
+        for s, t in todo.items())

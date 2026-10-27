@@ -176,6 +176,10 @@ def targets_dir(cfg, dataset, variant):
     return cfg["results_root"] / dataset / variant / "targets"
 
 
+def tau_scan_dir(cfg, dataset, variant, tau):
+    return targets_dir(cfg, dataset, variant) / "tau_scan" / f"tau-{tau}"
+
+
 def fit_dir(cfg, task):
     return (cfg["results_root"] / task["dataset"] / task["variant"] / "fits"
             / task["model"] / task["tag"] / task["half"])

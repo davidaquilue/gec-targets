@@ -8,7 +8,8 @@
 # irreversibility) a GEC can pick up, so the key question is whether FS_A is a
 # reliable signal or estimation noise.
 #
-# Needs: `python -m gectargets targets CONFIG`. Run as a script
+# Needs: `python -m gectargets targets CONFIG` (section 8 also reads the raw
+# data, to recompute FS at other lags). Run as a script
 # (`python studies/study1_empirical_targets.py CONFIG`) or cell by cell.
 # Figures and tables go to `<results_root>/studies/study1/`.
 
@@ -19,19 +20,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from gectargets.analysis import (TARGETS, edge_vectors, target_matrices,
-                                 offdiag, between_subject, corr_matrix,
-                                 identifiability, loo_group_corr,
-                                 signflip_null, snr_split_half, snr_epochs,
-                                 epoch_tstats, fdr_fraction, epoch_signflip)
+from gectargets.analysis import (TARGETS, SNR_METRICS, edge_vectors,
+                                 target_matrices, offdiag, between_subject,
+                                 corr_matrix, identifiability, loo_group_corr,
+                                 signflip_null, snr_metric, snr_split_half,
+                                 snr_epochs, epoch_tstats, fdr_fraction,
+                                 epoch_signflip)
 from gectargets.config import load_config, study_dir, target_variants, \
     variant_name
 from gectargets.plotting import TARGET_COLORS, GRAY, show_matrix, save
-from gectargets.results import load_targets
+from gectargets.results import load_targets, load_tau_scan
+from gectargets.targets import compute_tau_scan
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 GROUPS = None        # e.g. ["HC"] to restrict every analysis to one group
 N_PERM = 1000        # sign flips for the FS_A null
+TAUS = list(range(1, 16))       # lags (samples) of the tau scan, section 8
+# any of analysis.SNR_METRICS (listed when section 8 runs)
+TAU_METRICS = ["snr", "snr_epochs", "epoch_signflip", "between_r", "i_diff"]
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study1")
@@ -45,6 +51,7 @@ for dataset, prep in target_variants(cfg):
     data[name] = {k: (v[keep] if isinstance(v, np.ndarray) and len(v) ==
                       len(keep) else v) for k, v in d.items()}
     data[name]["subjects"] = list(np.array(d["subjects"])[keep])
+    data[name].update(dataset=dataset, prep=prep, variant=variant, keep=keep)
     print(f"{name}: {keep.sum()} subjects, {d['fc'].shape[-1]} nodes, "
           f"tau = {d['meta']['tau']} samples ({d['meta']['tau_s']:.3g} s)")
 
@@ -293,3 +300,83 @@ summary = pd.DataFrame(summary)
 summary.to_csv(out / "7_summary.csv", index=False)
 with pd.option_context("display.width", 200, "display.precision", 3):
     print(summary.to_string(index=False))
+
+# %% [markdown]
+# ## 8. Signal to noise as a function of tau
+# FS (all epochs, the two halves and every epoch) is recomputed at every lag
+# in TAUS, cached next to the targets (only new lags are computed; needs the
+# raw data), and each metric in TAU_METRICS is followed over tau. Lines are
+# the median over subjects (or subject pairs), bands the interquartile range
+# where the metric has one value per subject. Epoch metrics are skipped for
+# single-epoch data (fMRI). FC does not depend on tau (flat reference); the
+# dashed line is the tau of the targets.
+
+# %%
+for metric, text in SNR_METRICS.items():
+    print(f"{metric:>14}: {text}")
+
+tau_rows = []
+for name, d in data.items():
+    compute_tau_scan(cfg, d["dataset"], d["prep"], TAUS,
+                     cfg.get("n_jobs", 1))
+    n = len(d["subjects"])
+    fc_ep = d.get("fc_epochs", np.full(n, None))
+    for tau in TAUS:
+        scan = load_tau_scan(cfg, d["dataset"], d["variant"], tau)
+        all_, odd, even = (edge_vectors(d[f"fc{h}"], scan[f"fs{h}"][d["keep"]])
+                           for h in ("", "_odd", "_even"))
+        fs_ep = scan["fs_epochs"][d["keep"]] if "fs_epochs" in scan else \
+            np.full(n, None)
+        ep = [None if fc is None or fs is None else edge_vectors(fc, fs)
+              for fc, fs in zip(fc_ep, fs_ep)]
+        if all(e is None for e in ep):
+            if d["n_epochs"].max() > 1:
+                print(f"{name}, tau {tau}: no per-epoch FS in the targets or "
+                      f"the tau scan (computed before they were stored); "
+                      f"delete targets/tau_scan/tau-{tau} to recompute it")
+            ep = None
+        for key in TARGETS:
+            E = None if ep is None else \
+                [None if e is None else e[key] for e in ep]
+            for metric in TAU_METRICS:
+                v = np.atleast_1d(snr_metric(metric, all_[key], odd[key],
+                                             even[key], key, E, N_PERM))
+                if np.isnan(v).all():
+                    continue
+                tau_rows.append({"data": name, "tau": tau,
+                                 "tau_s": tau / d["meta"]["sfreq"],
+                                 "target": key, "metric": metric,
+                                 "value": np.nanmedian(v),
+                                 "q25": np.nanquantile(v, 0.25),
+                                 "q75": np.nanquantile(v, 0.75)})
+tau_scan = pd.DataFrame(tau_rows)
+tau_scan.to_csv(out / "8_tau_scan.csv", index=False)
+
+fig, axes = plt.subplots(len(TAU_METRICS), len(data),
+                         figsize=(4.5 * len(data), 3 * len(TAU_METRICS)),
+                         squeeze=False)
+for row, metric in zip(axes, TAU_METRICS):
+    for ax, (name, d) in zip(row, data.items()):
+        ax.set(title=name, xlabel="tau (s)", ylabel=metric)
+        rows = tau_scan[(tau_scan.data == name) & (tau_scan.metric == metric)]
+        if rows.value.isna().all():
+            ax.text(0.5, 0.5, "not available (single epoch)", color=GRAY,
+                    ha="center", va="center", transform=ax.transAxes)
+            ax.set(xticks=[], yticks=[])
+            continue
+        for key in TARGETS:
+            s = rows[rows.target == key]
+            if s.value.isna().all():
+                continue
+            ax.plot(s.tau_s, s.value, color=TARGET_COLORS[key], label=key,
+                    marker="o", markersize=3)
+            ax.fill_between(s.tau_s, s.q25, s.q75, color=TARGET_COLORS[key],
+                            alpha=0.2, linewidth=0)
+        ax.axvline(d["meta"]["tau_s"], color=GRAY, linestyle="--",
+                   linewidth=1)
+        if metric in ("snr", "snr_epochs", "within_snr"):
+            ax.axhline(0, color=GRAY, linewidth=1)
+            ax.set_yscale("symlog", linthresh=0.1)
+    row[0].legend(fontsize=7)
+fig.tight_layout()
+save(fig, out / "8_tau_scan.png")

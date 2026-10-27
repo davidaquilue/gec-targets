@@ -111,6 +111,19 @@ are logged (`history_*` in the subject's `.npz`).
 
   Both assume independent noise between halves / epochs; correlated
   neighbouring epochs make the noise look smaller than it is.
+* **Metrics over tau** (study 1, section 8): FS (all epochs, halves and,
+  with more than one epoch, every epoch) is recomputed at a list of lags
+  (`targets.compute_tau_scan`, cached in `targets/tau_scan/tau-<tau>/`) and
+  any of `analysis.SNR_METRICS` is followed over tau:
+  * within subject: `snr` (split half) and `snr_epochs` (epochs), as above;
+    `fdr_edges` and `epoch_signflip` (FS_A, epochs: fraction of edges
+    passing FDR, fraction of subjects with sign-flip p < 0.05); `within_r`
+    and `within_snr = 2 r / (1 - r)`, r the mean split-half correlation (the
+    centred counterpart of `snr`);
+  * between subjects: `between_r`, `loo_r`, `signflip_z` (FS_A: mean LOO r
+    in SDs of the subject sign-flip null), and `i_diff`, `accuracy`.
+
+  Epoch metrics are skipped for single-epoch data (fMRI).
 * **GEC similarity**: on the support of the initial matrix only (the
   entries outside it are 0 for every subject). Reported with `r_to_sc`, the
   similarity of each GEC to the SC it started from, since a shared SC makes
