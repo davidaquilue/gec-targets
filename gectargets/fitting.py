@@ -6,7 +6,6 @@ Learning rule (every iteration, on the entries that are non-zero in the
 initial matrix, i.e. the SC support):
 
     C += eps_fc (FC_emp - FC_sim) + eps_fs (FS_emp - FS_sim)
-         + eps_fs_asym (FS_A,emp - FS_A,sim)          (0 = original rule)
     C  = max(C, 0), then the model's normalisation
 
 Convergence is checked every ``check_every`` iterations on an error E:
@@ -69,13 +68,12 @@ def rule_error(rule, fc_emp, fs_emp, fc_sim, fs_sim):
                  + np.mean((fs_emp - fs_sim) ** 2))
 
 
-def fit_gec(fc_emp, fs_emp, model, C0, tau_s, eps_fc, eps_fs, eps_fs_asym=0.0,
+def fit_gec(fc_emp, fs_emp, model, C0, tau_s, eps_fc, eps_fs,
             max_iter=5000, tol=1e-5, check_every=10, convergence="legacy",
             log_every=10, **_):
     """Fit one subject. Returns coupling C, simulated FC / FS, history."""
     C = model.prepare(C0)
     mask = (C > 0) & ~np.eye(len(C), dtype=bool)
-    fs_a_emp = asym(fs_emp)
     history = {k: [] for k in HISTORY_KEYS}
     old_error, stop = START_ERROR, "max_iter"
 
@@ -97,10 +95,7 @@ def fit_gec(fc_emp, fs_emp, model, C0, tau_s, eps_fc, eps_fs, eps_fs_asym=0.0,
                 break
             old_error = error
 
-        d_fs = fs_emp - fs_sim
-        step = eps_fc * (fc_emp - fc_sim) + eps_fs * d_fs
-        if eps_fs_asym:
-            step = step + eps_fs_asym * (fs_a_emp - asym(fs_sim))
+        step = eps_fc * (fc_emp - fc_sim) + eps_fs * (fs_emp - fs_sim)
         C = C + np.where(mask, step, 0.0)
         C = model.normalize(np.where(mask & (C < 0), 0.0, C))
 

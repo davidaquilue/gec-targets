@@ -66,7 +66,7 @@ relative to the config file and may contain `$ENV_VARS`.
 | `bands` | band name -> `[f_low, f_high]` Hz |
 | `preprocessing` | `envelope`, `orthogonalize` (booleans), `tau` (`"FIT"` or samples) |
 | `models` | default parameters of each model, including its learning rates `eps_fc`, `eps_fs` |
-| `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `none`), `log_every`, `n_init`, `seed`, `eps_fs_asym`, `split_half` |
+| `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `none`), `log_every`, `n_init`, `seed`, `split_half` |
 | `sweep` | list of entries `{datasets, models, grid}`; each is the product datasets x models x grid. `grid` keys can be any model parameter, fitting setting or preprocessing option. `split_half: true` in an entry also fits odd and even epochs (3x the cost) |
 
 ### Outputs

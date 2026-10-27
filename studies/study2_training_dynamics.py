@@ -58,7 +58,7 @@ for t in tasks:
     f = fits[t["id"]]
     rows.append({"id": t["id"], "data_model": label(t),
                  **{k: t["fit"][k] for k in ("eps_fc", "eps_fs",
-                                              "eps_fs_asym", "convergence")},
+                                              "convergence")},
                  **t["model_params"], "n_subjects": len(f["subjects"]),
                  "n_iter_median": float(np.median(f["n_iter"])),
                  "stopped_by_rule": float(np.mean(f["stop"] != "max_iter")),

@@ -64,10 +64,8 @@ Starting from the SC (`prepare`: absolute value, symmetrised, normalised) or
 from `|randn|` (seed from `seed`, the subject id and the initialisation
 index), on the entries that are non-zero at the start:
 
-    C += eps_fc (FC - FC_sim) + eps_fs (FS - FS_sim) + eps_fs_asym (FS_A - FS_A,sim)
+    C += eps_fc (FC - FC_sim) + eps_fs (FS - FS_sim)
     C  = max(C, 0);  C = constraint(C)
-
-`eps_fs_asym = 0` is the original rule.
 
 Every `check_every` iterations an error E is computed and the fit stops when
 `(E_old - E) / E < tol` (this includes E increasing):
@@ -118,7 +116,7 @@ are logged (`history_*` in the subject's `.npz`).
   those of the previous iteration when the loop ran to `max_iter`).
 * The linear Hopf branch keeps the full 2N covariance (in the MATLAB code
   `expm(tau A)` (2N x 2N) multiplied the N x N block, a dimension error).
-* New: `eps_fs_asym`, the `normalized` / `none` convergence rules, the
-  logged history, `split_half`.
+* New: the `normalized` / `none` convergence rules, the logged history,
+  `split_half`.
 * Not ported: `legacy_noabs` (use `legacy` with `"use_abs": false`), the
   leakage operator M (the fit loop can take it later: `M S M'`).

@@ -20,7 +20,7 @@ load_dotenv()
 PREPROCESSING_KEYS = ("envelope", "orthogonalize")
 # Settings of the fitting loop (everything else in a model block is a model
 # parameter, passed to the model class)
-FIT_KEYS = ("eps_fc", "eps_fs", "eps_fs_asym", "max_iter", "tol",
+FIT_KEYS = ("eps_fc", "eps_fs", "max_iter", "tol",
             "check_every", "convergence", "log_every", "n_init", "seed")
 HALVES_SPLIT = ("all", "odd", "even")
 
@@ -91,7 +91,7 @@ def run_tag(model_params, fit):
     never share a folder.
     """
     shown = {k: v for k, v in model_params.items() if not k.endswith("_path")}
-    shown.update({k: fit[k] for k in ("eps_fc", "eps_fs", "eps_fs_asym")})
+    shown.update({k: fit[k] for k in ("eps_fc", "eps_fs")})
     text = "_".join(f"{k}-{_fmt(v)}" for k, v in sorted(shown.items()))
     digest = hashlib.md5(json.dumps(
         {"model": model_params, "fit": fit}, sort_keys=True, default=str
@@ -115,7 +115,6 @@ def _make_task(cfg, dataset, model, swept, half):
     prep = {k: swept.get(k, cfg["preprocessing"][k])
             for k in PREPROCESSING_KEYS}
     fit = {k: merged[k] for k in FIT_KEYS if k in merged}
-    fit.setdefault("eps_fs_asym", 0.0)
     model_params = {k: v for k, v in merged.items()
                     if k not in FIT_KEYS and k not in cfg["fitting"]}
     ds_cfg = cfg["datasets"][dataset]
