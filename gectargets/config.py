@@ -116,7 +116,8 @@ def _make_task(cfg, dataset, model, swept, half):
             for k in PREPROCESSING_KEYS}
     fit = {k: merged[k] for k in FIT_KEYS if k in merged}
     model_params = {k: v for k, v in merged.items()
-                    if k not in FIT_KEYS and k not in cfg["fitting"]}
+                    if k not in FIT_KEYS and k not in cfg["fitting"]
+                    and k not in PREPROCESSING_KEYS}
     ds_cfg = cfg["datasets"][dataset]
     return {
         "dataset": dataset,
