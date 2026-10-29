@@ -9,6 +9,7 @@
       "loader": "bids_epochs",
       "root": "$DATA_DIR/UCM_MEG/bids_extended-AD",
       "epochs_dir": "epochs_AAL_SFREQ_250_EPLEN_4",
+      "participants_filter": {"classification": ["HC"]},
       "modality": "meg",
       "session": "resteyesclosed",
       "band": "alpha",
@@ -20,11 +21,11 @@
       "_comment": "Channel-space EEG (30 channels): no SC, seeded random initialisation.",
       "loader": "bids_epochs",
       "root": "$DATA_DIR/EEG_UniRoma_FDT/BIDS",
-      "epochs_dir": "epochs_SFREQ_256_EPLEN_1_own",
+      "epochs_dir": "epochs_SFREQ_250_EPLEN_4_own",
       "modality": "eeg",
       "session": "eyesclosed",
       "subject_prefix": "sub-",
-      "participants_filter": {"classification": ["HC", "AD"]},
+      "participants_filter": {"classification": ["HC"]},
       "band": "alpha",
       "atlas": null,
       "sc_path": null
@@ -33,13 +34,36 @@
       "_comment": "fMRI, already band-passed in preprocessing: band null. One 197-TR epoch per subject (split in time for split-half).",
       "loader": "bids_epochs",
       "root": "$DATA_DIR/ADNI Datasets/ADNI_BIDS/derivatives/fdt_project",
+      "participants_filter": {"classification": ["CN (Ab-)"]},
       "epochs_dir": "epochs_Schaefer400",
       "modality": "bold",
       "session": "M000",
       "band": null,
       "atlas": "Schaefer400",
       "sc_path": "$DATA_DIR/ADNI_parcellated_data/connectomes/HCP/SC_schaefer400_tian_S3_7Networks_32fold_groupconnectome_3T_MNI152NLin2009cAsym_2mm.csv"
-    }
+    },
+    "HCP_RESTLR": {
+    "_comment": "HCP fMRI, one run per subject. band null: used as stored; if the series are not band-passed add e.g. \"bold\": [0.008, 0.08] to bands and set band: \"bold\". sc_path: check that the SC has the same node order as the time series.",
+    "loader": "bids_epochs",
+    "root": "D:/HCP/BIDS",
+    "epochs_dir": "epochs_schaefer116-reshapedTo100",
+    "modality": "bold",
+    "session": "RESTLR",
+    "band": null,
+    "atlas": "schaefer116-reshapedTo100",
+    "sc_path": "D:/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv"
+  },
+  "HCP_WMLR": {
+    "_comment": "HCP fMRI, one run per subject. band null: used as stored; if the series are not band-passed add e.g. \"bold\": [0.008, 0.08] to bands and set band: \"bold\". sc_path: check that the SC has the same node order as the time series.",
+    "loader": "bids_epochs",
+    "root": "D:/HCP/BIDS",
+    "epochs_dir": "epochs_schaefer116-reshapedTo100",
+    "modality": "bold",
+    "session": "WMLR",
+    "band": null,
+    "atlas": "schaefer116-reshapedTo100",
+    "sc_path": "D:/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv"
+  }
   },
 
   "bands": {"theta": [4, 8], "alpha": [8, 13], "beta": [13, 30], "gamma": [30, 45]},
@@ -63,11 +87,11 @@
 
   "sweep": [
     {"_comment": "Study 2: fix eps_fc, vary eps_fs (and the reverse)",
-     "datasets": ["UCM_AAL", "UniRoma", "ADNI_Schaefer400"],
+     "datasets": ["UCM_AAL", "UniRoma", "ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
      "models": ["network"],
      "grid": {"eps_fc": [0.003, 0.01, 0.03], "eps_fs": [0.03, 0.1, 0.3]}},
     {"_comment": "Study 3: models at their default settings",
-     "datasets": ["UCM_AAL", "UniRoma", "ADNI_Schaefer400"],
+     "datasets": ["UCM_AAL", "UniRoma", "ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
      "models": ["legacy", "network"]}
   ]
 }

@@ -234,8 +234,10 @@ for row in summary:
     s = snr[(snr.data == row["data"]) & (snr.target == row["target"])]
     for method in ("split_half", "epochs"):
         row[f"snr_{method}_median"] = s.loc[s.method == method, "snr"].median()
-    if row["target"] == "FS_A":
-        e = s[s.method == "epochs"]
+    e = s[s.method == "epochs"]
+    # Single-epoch data (fMRI) has no epoch rows; with no multi-epoch dataset
+    # at all, snr does not even have these columns
+    if row["target"] == "FS_A" and not e.empty:
         row["frac_subjects_signflip_05"] = (e.p_signflip < 0.05).mean()
         row["frac_edges_fdr_median"] = e.frac_edges_fdr.median()
 
