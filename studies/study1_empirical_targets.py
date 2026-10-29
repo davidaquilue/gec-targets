@@ -35,7 +35,9 @@ from gectargets.targets import compute_tau_scan
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 GROUPS = None        # e.g. ["HC"] to restrict every analysis to one group
 N_PERM = 1000        # sign flips for the FS_A null
-TAUS = list(range(1, 16))       # lags (samples) of the tau scan, section 8
+# Lags of the tau scan, section 8: N_TAUS log-spaced lags from 1 sample to
+# TAU_RANGE x the fitted tau of each dataset and variant (plus that tau)
+TAU_RANGE, N_TAUS = 3, 15
 # any of analysis.SNR_METRICS (listed when section 8 runs)
 TAU_METRICS = ["snr", "snr_epochs", "epoch_signflip", "between_r", "i_diff"]
 
@@ -305,25 +307,36 @@ with pd.option_context("display.width", 200, "display.precision", 3):
 
 # %% [markdown]
 # ## 8. Signal to noise as a function of tau
-# FS (all epochs, the two halves and every epoch) is recomputed at every lag
-# in TAUS, cached next to the targets (only new lags are computed; needs the
-# raw data), and each metric in TAU_METRICS is followed over tau. Lines are
-# the median over subjects (or subject pairs), bands the interquartile range
-# where the metric has one value per subject. Epoch metrics are skipped for
-# single-epoch data (fMRI). FC does not depend on tau (flat reference); the
-# dashed line is the tau of the targets.
+# FS (all epochs, the two halves and every epoch) is recomputed at
+# N_TAUS log-spaced lags from 1 sample to TAU_RANGE x the tau of the targets,
+# so each dataset and variant is scanned around its own timescale (an
+# envelope decays far slower than the band-passed signal). The FS are cached
+# next to the targets (only new lags are computed; needs the raw data), and
+# each metric in TAU_METRICS is followed over tau. Lines are the median over
+# subjects (or subject pairs), bands the interquartile range where the metric
+# has one value per subject. Epoch metrics are skipped for single-epoch data
+# (fMRI). FC does not depend on tau (flat reference); the dashed line is the
+# tau of the targets.
 
 # %%
+def scan_lags(tau):
+    """Integer lags (samples) of the tau scan around a fitted tau."""
+    lags = np.geomspace(1, max(TAU_RANGE * tau, 1), N_TAUS).round()
+    return sorted({int(x) for x in lags} | {int(tau)})
+
+
 for metric, text in SNR_METRICS.items():
     print(f"{metric:>14}: {text}")
 
 tau_rows = []
 for name, d in data.items():
-    compute_tau_scan(cfg, d["dataset"], d["prep"], TAUS,
+    taus = scan_lags(d["meta"]["tau"])
+    print(f"{name}: lags {taus} samples")
+    compute_tau_scan(cfg, d["dataset"], d["prep"], taus,
                      cfg.get("n_jobs", 1))
     n = len(d["subjects"])
     fc_ep = d.get("fc_epochs", np.full(n, None))
-    for tau in TAUS:
+    for tau in taus:
         scan = load_tau_scan(cfg, d["dataset"], d["variant"], tau)
         all_, odd, even = (edge_vectors(d[f"fc{h}"], scan[f"fs{h}"][d["keep"]])
                            for h in ("", "_odd", "_even"))
@@ -359,7 +372,7 @@ fig, axes = plt.subplots(len(TAU_METRICS), len(data),
                          squeeze=False)
 for row, metric in zip(axes, TAU_METRICS):
     for ax, (name, d) in zip(row, data.items()):
-        ax.set(title=name, xlabel="tau (s)", ylabel=metric)
+        ax.set(title=name, xlabel="tau (s)", ylabel=metric, xscale="log")
         rows = tau_scan[(tau_scan.data == name) & (tau_scan.metric == metric)]
         if rows.value.isna().all():
             ax.text(0.5, 0.5, "not available (single epoch)", color=GRAY,

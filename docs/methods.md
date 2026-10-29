@@ -112,8 +112,10 @@ are logged (`history_*` in the subject's `.npz`).
   Both assume independent noise between halves / epochs; correlated
   neighbouring epochs make the noise look smaller than it is.
 * **Metrics over tau** (study 1, section 8): FS (all epochs, halves and,
-  with more than one epoch, every epoch) is recomputed at a list of lags
-  (`targets.compute_tau_scan`, cached in `targets/tau_scan/tau-<tau>/`) and
+  with more than one epoch, every epoch) is recomputed at log-spaced lags
+  from 1 sample to 3 x the fitted tau of each dataset and variant, so an
+  envelope is scanned over its own (longer) timescale
+  (`targets.compute_tau_scan`, cached in `targets/tau_scan/tau-<tau>/`), and
   any of `analysis.SNR_METRICS` is followed over tau:
   * within subject: `snr` (split half) and `snr_epochs` (epochs), as above;
     `fdr_edges` and `epoch_signflip` (FS_A, epochs: fraction of edges
