@@ -21,26 +21,26 @@
     "HCP_RESTLR": {
       "_comment": "HCP fMRI, one run per subject. band null: used as stored; if the series are not band-passed add e.g. \"bold\": [0.008, 0.08] to bands and set band: \"bold\". sc_path: check that the SC has the same node order as the time series.",
       "loader": "bids_epochs",
-      "root": "D:/HCP/BIDS",
+      "root": "$DATA_DIR/HCP/BIDS",
       "epochs_dir": "epochs_schaefer116-reshapedTo100",
       "modality": "bold",
       "session": "RESTLR",
       "band": null,
       "atlas": "schaefer116-reshapedTo100",
-      "sc_path": "D:/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv",
+      "sc_path": "$DATA_DIR/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv",
       "_freqs_path": "Hopf node frequencies: python scripts/compute_node_freqs.py configs/fmri.json HCP_RESTLR",
       "freqs_path": "$DATA_DIR/gec_targets_results/fmri/HCP_RESTLR/nofilter/targets/node_freqs.csv"
     },
     "HCP_WMLR": {
       "_comment": "HCP fMRI, one run per subject. band null: used as stored; if the series are not band-passed add e.g. \"bold\": [0.008, 0.08] to bands and set band: \"bold\". sc_path: check that the SC has the same node order as the time series.",
       "loader": "bids_epochs",
-      "root": "D:/HCP/BIDS",
+      "root": "$DATA_DIR/HCP/BIDS",
       "epochs_dir": "epochs_schaefer116-reshapedTo100",
       "modality": "bold",
       "session": "WMLR",
       "band": null,
       "atlas": "schaefer116-reshapedTo100",
-      "sc_path": "D:/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv",
+      "sc_path": "$DATA_DIR/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv",
       "_freqs_path": "Shares the rest frequencies of HCP_RESTLR",
       "freqs_path": "$DATA_DIR/gec_targets_results/fmri/HCP_RESTLR/nofilter/targets/node_freqs.csv"
     }
