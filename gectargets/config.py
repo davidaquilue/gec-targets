@@ -56,6 +56,8 @@ def load_config(path):
     for ds in cfg["datasets"].values():
         for key in ("root", "sc_path"):
             ds[key] = _resolve(ds.get(key), base)
+        if ds.get("freqs_path"):
+            ds["freqs_path"] = str(_resolve(ds["freqs_path"], base))
     for params in cfg["models"].values():
         if params.get("freqs_path"):
             # Keep "{subject}" placeholders: resolve the rest of the path
@@ -119,6 +121,11 @@ def _make_task(cfg, dataset, model, swept, half):
                     if k not in FIT_KEYS and k not in cfg["fitting"]
                     and k not in PREPROCESSING_KEYS}
     ds_cfg = cfg["datasets"][dataset]
+    # Node frequencies (linear_hopf) set per dataset override the model's
+    # default, unless swept
+    if ("freqs_path" in model_params and ds_cfg.get("freqs_path")
+            and "freqs_path" not in swept):
+        model_params["freqs_path"] = ds_cfg["freqs_path"]
     return {
         "dataset": dataset,
         "variant": variant_name(ds_cfg, prep),

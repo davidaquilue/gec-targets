@@ -54,7 +54,12 @@ observed:
   `theta: "FIT"` uses the mean over nodes of `-ln(acf_i(tau)) / tau` from the
   targets. gamma in (0, 1) is the coupling relative to the decay.
 * `linear_hopf`: one frequency per node from `freqs_path` (Hz; `{subject}` in
-  the path for one file per subject). Only x is observed; the lag is applied
+  the path for one file per subject), set in the dataset block (overrides the
+  model's) so datasets can share or differ. `scripts/compute_node_freqs.py`
+  computes it: per subject, the PSD of every node (Welch, one Hann window per
+  epoch, signals preprocessed as for the targets), averaged over subjects;
+  the frequency of the maximum within [fmin, fmax] (default 0.008-0.08 Hz).
+  Only x is observed; the lag is applied
   to the full 2N-dimensional state. With the "lagged" normalisation, FS_ii is
   proportional to the autocovariance at tau, which becomes negative when
   `2 pi f tau > pi/2` (alpha at 10 Hz: tau > 25 ms); the fit then fails

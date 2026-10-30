@@ -20,12 +20,15 @@ tau is either fixed (samples) or "FIT": the first lag at which the
 autocorrelation, averaged over subjects, epochs and nodes, drops to 1/e.
 theta (network model, "FIT") is the mean over nodes of -ln(acf_i(tau)) / tau,
 the decay rate of an isolated OU node with the observed autocorrelation.
+
+node_peak_freqs: the node frequencies of the Hopf model, the peak of each
+node's PSD averaged over subjects (scripts/compute_node_freqs.py).
 """
 import json
 
 import numpy as np
 from joblib import Parallel, delayed
-from scipy.signal import butter, detrend, hilbert, sosfiltfilt
+from scipy.signal import butter, detrend, hilbert, sosfiltfilt, welch
 
 from .config import tau_scan_dir, targets_dir, variant_name
 from .loaders import get_loader
@@ -207,6 +210,57 @@ def compute_targets(cfg, dataset, prep, n_jobs=1):
         json.dump(meta, f, indent=1)
     print(f"[{dataset}] {len(subjects)} subjects -> {out_dir}")
     return out_dir
+
+
+# -------------------------------------------------------- node frequencies
+N_PSD = 2048  # points of the common frequency grid, 0 .. sfreq / 2
+
+
+def _subject_psd(loader, subject, band, prep, grid):
+    """PSD (n_nodes, len(grid)) of one subject, mean over epochs, on grid."""
+    x = _load(loader, subject, band, prep)
+    if x is None:
+        return None
+    # One Hann window per epoch (for fMRI the whole run); runs of different
+    # lengths are brought to the common grid
+    f, p = welch(x, fs=loader.sfreq, nperseg=x.shape[-1], axis=-1)
+    return np.array([np.interp(grid, f, node) for node in p.mean(axis=0)])
+
+
+def node_peak_freqs(cfg, dataset, fmin=None, fmax=None, n_jobs=1):
+    """Peak frequency (Hz) of every node, for the Hopf model.
+
+    Per subject, the signals are preprocessed as for the targets (band of
+    the dataset if any, detrend, z-score; no envelope or orthogonalisation)
+    and the PSD of every node is computed (Welch, one Hann window per epoch).
+    The PSDs are averaged over subjects and each node's frequency is that of
+    the maximum within [fmin, fmax] (default: the dataset band, else up to
+    Nyquist, without 0 Hz).
+
+    Returns dict: freqs (n_nodes,), grid (n_grid,), psd (n_nodes, n_grid),
+    subjects, fmin, fmax."""
+    ds_cfg = cfg["datasets"][dataset]
+    loader = get_loader(ds_cfg)
+    band_name = ds_cfg.get("band")
+    band = cfg["bands"][band_name] if band_name else None
+    prep = {"envelope": False, "orthogonalize": False}
+    grid = np.linspace(0, loader.sfreq / 2, N_PSD)
+    fmin = fmin if fmin is not None else (band[0] if band else grid[1])
+    fmax = fmax if fmax is not None else (band[1] if band else grid[-1])
+    subjects = list(loader.subjects())
+    psds = Parallel(n_jobs=n_jobs)(
+        delayed(_subject_psd)(loader, s, band, prep, grid) for s in subjects)
+    done = [(s, p) for s, p in zip(subjects, psds) if p is not None]
+    if not done:
+        raise RuntimeError(f"[{dataset}] no subject could be loaded")
+    psd = np.mean([p for _, p in done], axis=0)
+    inside = (grid >= fmin) & (grid <= fmax)
+    if not inside.any():
+        raise ValueError(f"[{dataset}] no frequency in [{fmin}, {fmax}] Hz "
+                         f"(Nyquist {grid[-1]:.4g} Hz)")
+    freqs = grid[inside][np.argmax(psd[:, inside], axis=1)]
+    return {"freqs": freqs, "grid": grid, "psd": psd,
+            "subjects": [s for s, _ in done], "fmin": fmin, "fmax": fmax}
 
 
 # ---------------------------------------------------------------- tau scan

@@ -65,7 +65,7 @@ relative to the config file and may contain `$ENV_VARS`.
 | Block | Content |
 |---|---|
 | `results_root` | where everything is written |
-| `datasets` | one entry per dataset: loader, paths, `band` (`null` = use as stored, e.g. fMRI), `sc_path` (`null` = seeded random initialisation, e.g. channel-space EEG), optional `n_epochs` (fixed number of random epochs per subject) |
+| `datasets` | one entry per dataset: loader, paths, `band` (`null` = use as stored, e.g. fMRI), `sc_path` (`null` = seeded random initialisation, e.g. channel-space EEG), optional `n_epochs` (fixed number of random epochs per subject) and `freqs_path` (node frequencies of the `linear_hopf` model, from `scripts/compute_node_freqs.py CONFIG DATASET`) |
 | `bands` | band name -> `[f_low, f_high]` Hz |
 | `preprocessing` | `envelope`, `orthogonalize` (booleans), `tau` (`"FIT"` or samples) |
 | `models` | default parameters of each model, including its learning rates `eps_fc`, `eps_fs` |
