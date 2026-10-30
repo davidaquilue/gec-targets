@@ -1,0 +1,84 @@
+{
+  "_comment": "Electrophysiology: UCM MEG and UniRoma EEG, each as raw band-passed signals and as orthogonalised envelopes. Paths accept $ENV_VARS; $DATA_DIR is set in .env.",
+  "results_root": "$DATA_DIR/gec_targets_results/electrophysiology",
+  "n_jobs": 8,
+
+  "datasets": {
+    "UCM_AAL": {
+      "_comment": "Source-reconstructed MEG, AAL. n_epochs = 38: fixed number of epochs per subject (fdt_eeg gec_diagnostics a3).",
+      "loader": "bids_epochs",
+      "root": "$DATA_DIR/UCM_MEG/bids_extended-AD",
+      "epochs_dir": "epochs_AAL_SFREQ_250_EPLEN_4",
+      "participants_filter": {"classification": ["HC"]},
+      "modality": "meg",
+      "session": "resteyesclosed",
+      "band": "alpha",
+      "atlas": "AAL",
+      "n_epochs": 38,
+      "sc_path": "$DATA_DIR/ADNI_parcellated_data/connectomes/Skoch_et_al_2022/SC_AAL_avg_88HC.csv"
+    },
+    "UniRoma": {
+      "_comment": "Channel-space EEG (30 channels): no SC, seeded random initialisation.",
+      "loader": "bids_epochs",
+      "root": "$DATA_DIR/EEG_UniRoma_FDT/BIDS",
+      "epochs_dir": "epochs_SFREQ_250_EPLEN_4_own",
+      "modality": "eeg",
+      "session": "eyesclosed",
+      "subject_prefix": "sub-",
+      "participants_filter": {"classification": ["HC"]},
+      "band": "alpha",
+      "atlas": null,
+      "sc_path": null
+    }
+  },
+
+  "bands": {"theta": [4, 8], "alpha": [8, 13], "beta": [13, 30], "gamma": [30, 45]},
+
+  "_preprocessing": "Defaults: raw signals (variant 'alpha'). The sweep entries with envelope + orthogonalize give the 'alpha_env_orth' variant. The two options are set together in one grid entry, not as two lists, so the mixed variants (env only, orth only) are not computed.",
+  "preprocessing": {"envelope": false, "orthogonalize": false, "tau": "FIT"},
+
+  "models": {
+    "legacy": {"sigma": 0.05, "maxC": 0.2, "use_abs": true,
+               "eps_fc": 4e-4, "eps_fs": 1e-4},
+    "network": {"sigma": 0.05, "theta": "FIT", "gamma": 0.8,
+                "eps_fc": 1e-2, "eps_fs": 1e-1},
+    "linear_hopf": {"_comment": "freqs_path: one value (Hz) per node; '{subject}' in the path selects a file per subject. TODO: compute.",
+                    "sigma": 0.05, "maxC": 0.2, "a": -0.02,
+                    "freqs_path": null,
+                    "eps_fc": 4e-4, "eps_fs": 1e-4}
+  },
+
+  "fitting": {"max_iter": 5000, "tol": 1e-5, "check_every": 10,
+              "convergence": "legacy", "log_every": 10, "n_init": 1,
+              "seed": 0, "split_half": false},
+
+  "sweep": [
+    {
+      "_comment": "Study 2, raw signals: fix eps_fc, vary eps_fs (and the reverse)",
+      "datasets": ["UCM_AAL", "UniRoma"],
+      "models": ["legacy", "network"],
+      "grid": {
+        "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5],
+        "eps_fs": [1e-4, 5e-4, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
+      }
+    },
+    {
+      "_comment": "Study 2, orthogonalised envelopes",
+      "datasets": ["UCM_AAL", "UniRoma"],
+      "models": ["legacy", "network"],
+      "grid": {
+        "envelope": [true], "orthogonalize": [true],
+        "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5],
+        "eps_fs": [1e-4, 5e-4, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5]
+      }
+    },
+
+    {"_comment": "Study 3, raw signals: models at their default settings",
+     "datasets": ["UCM_AAL", "UniRoma"],
+     "models": ["legacy", "network"]},
+    {"_comment": "Study 3, orthogonalised envelopes",
+     "datasets": ["UCM_AAL", "UniRoma"],
+     "models": ["legacy", "network"],
+     "grid": {"envelope": [true], "orthogonalize": [true]}}
+  ]
+}
