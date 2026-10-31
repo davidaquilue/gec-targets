@@ -90,13 +90,17 @@ def run_tag(model_params, fit):
 
     The readable part lists the model parameters and learning rates; the hash
     covers every setting, so two runs differing only in, e.g., ``max_iter``
-    never share a folder.
+    never share a folder. Input files (``*_path``, e.g. the Hopf frequencies)
+    are left out: like the SC and the targets they are inputs of the dataset,
+    and their paths differ between machines (laptop, cluster), which must
+    not change the folder. Fits made from another version of such a file
+    must be deleted by hand.
     """
-    shown = {k: v for k, v in model_params.items() if not k.endswith("_path")}
-    shown.update({k: fit[k] for k in ("eps_fc", "eps_fs")})
+    params = {k: v for k, v in model_params.items() if not k.endswith("_path")}
+    shown = dict(params, **{k: fit[k] for k in ("eps_fc", "eps_fs")})
     text = "_".join(f"{k}-{_fmt(v)}" for k, v in sorted(shown.items()))
     digest = hashlib.md5(json.dumps(
-        {"model": model_params, "fit": fit}, sort_keys=True, default=str
+        {"model": params, "fit": fit}, sort_keys=True, default=str
     ).encode()).hexdigest()[:6]
     return f"{text}_{digest}"
 

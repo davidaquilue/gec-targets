@@ -32,7 +32,7 @@ from scipy.signal import butter, detrend, hilbert, sosfiltfilt, welch
 
 from .config import tau_scan_dir, targets_dir, variant_name
 from .loaders import get_loader
-from .results import load_meta
+from .results import is_complete, load_meta, save_npz
 
 ACF_THRESHOLD = 1 / np.e
 
@@ -148,7 +148,7 @@ def _subject_save(loader, subject, band, prep, tau, out_dir):
     x = _load(loader, subject, band, prep)
     if x is None:
         return None
-    np.savez(out_dir / f"{subject}.npz", **subject_targets(x, tau))
+    save_npz(out_dir / f"{subject}.npz", **subject_targets(x, tau))
     return subject
 
 
@@ -276,7 +276,7 @@ def _subject_tau_scan(loader, subject, band, prep, taus, out_dirs):
             out["fs_epochs"] = fs
         for name, part in zip(("_odd", "_even"), halves(x)):
             out[f"fs{name}"] = fs_epochs(part, tau).mean(axis=0)
-        np.savez(out_dirs[tau] / f"{subject}.npz",
+        save_npz(out_dirs[tau] / f"{subject}.npz",
                  **{k: v.astype(np.float32) for k, v in out.items()})
     return subject
 
@@ -294,7 +294,7 @@ def compute_tau_scan(cfg, dataset, prep, taus, n_jobs=1):
     out_dirs = {int(tau): tau_scan_dir(cfg, dataset, variant, int(tau))
                 for tau in taus}
     todo = {s: [tau for tau, d in out_dirs.items()
-                if not (d / f"{s}.npz").exists()] for s in subjects}
+                if not is_complete(d / f"{s}.npz")] for s in subjects}
     todo = {s: t for s, t in todo.items() if t}
     if not todo:
         return

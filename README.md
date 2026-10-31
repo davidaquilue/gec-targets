@@ -99,6 +99,26 @@ array of the right size that starts when the targets are done. Adjust the
 `#SBATCH` lines (CPUs, memory, time, partition) to your cluster. Locally,
 `python -m gectargets fit CONFIG --task 3 -j 8` runs one task.
 
+### Fitting on a cluster, analysing elsewhere
+
+Results can be fitted on a cluster and copied to another machine for the
+studies:
+
+* Set `DATA_DIR` on each machine (its own `.env`): every path of the config
+  is resolved there. Fit folder names do not depend on these paths (input
+  files such as `freqs_path` are not part of the tag's hash), so the same run
+  has the same folder everywhere.
+* Copy with a tool that resumes and checks, e.g.
+  `rsync -av --partial cluster:<DATA_DIR>/gec_targets_results/ <DATA_DIR>/gec_targets_results/`.
+* Then `python -m gectargets check CONFIG`: it lists, per targets folder and
+  per task, the subject files that are missing or unreadable (truncated by
+  an interrupted copy), and exits with status 1 if any is unreadable. Copy
+  those again before running the studies. The studies leave out (and
+  report) an unreadable fit file; the `fit` step refits it.
+
+Results are written to a temporary file and renamed when complete, so a job
+killed while writing leaves no truncated file behind.
+
 Rough cost: one iteration is one Lyapunov solve and one matrix exponential,
 O(N^3). Up to 90 nodes a subject takes seconds to a few minutes; at 400 nodes
 (Schaefer400) expect several minutes per subject at the default 5000

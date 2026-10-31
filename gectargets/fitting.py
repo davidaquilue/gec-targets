@@ -35,6 +35,7 @@ from joblib import Parallel, delayed, parallel_config
 from .analysis import sym, asym, triu, offdiag, corr
 from .config import fit_dir, targets_dir
 from .models import build_model
+from .results import is_complete, save_npz
 
 HISTORY_KEYS = ("iter", "error", "r_fc", "r_fs", "r_fs_s", "r_fs_a",
                 "mse_fc", "mse_fs", "mse_fs_s", "mse_fs_a")
@@ -149,7 +150,7 @@ def fit_subject(task, meta, target_file, sc, out_file):
     fc_sim = np.mean([r["fc_sim"] for r in runs], axis=0)
     fs_sim = np.mean([r["fs_sim"] for r in runs], axis=0)
     first = runs[0]
-    np.savez(
+    save_npz(
         out_file, C=C, friction=model.friction(C), jacobian=model.jacobian(C),
         fc_sim=fc_sim, fs_sim=fs_sim, mask=first["mask"],
         n_iter=first["n_iter"], stop=first["stop"],
@@ -177,8 +178,10 @@ def run_task(cfg, task, n_jobs=1):
 
     sc_path = cfg["datasets"][task["dataset"]].get("sc_path")
     sc = None if sc_path is None else load_matrix(sc_path)
+    # A truncated file (job killed while writing, before writes were made
+    # atomic) is fitted again
     todo = [s for s in meta["subjects"]
-            if not (out_dir / f"{s}.npz").exists()]
+            if not is_complete(out_dir / f"{s}.npz")]
     print(f"Task {task['id']}: {task['dataset']} / {task['variant']} / "
           f"{task['model']} / {task['tag']} / {task['half']}: "
           f"{len(todo)} of {len(meta['subjects'])} subjects to fit, "
