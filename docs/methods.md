@@ -139,6 +139,20 @@ are logged (`history_*` in the subject's `.npz`).
   `Phi = tr(Q' D^-1 Q S^-1)` with `D = sigma^2 / 2 I` and `A S = -(D + Q)`,
   Q antisymmetric (Godrèche & Luck 2019). 0 for a reversible system;
   independent of sigma.
+* **Downstream measures of Study 4** (`gectargets/downstream.py`), computed
+  from the saved fits with fdt_eeg's own functions (verbatim copies in
+  `gectargets/fdt_eeg/`), called as in fdt_eeg's
+  `studies/4c_analytical_GEC_features`, with B = -jacobian (dx/dt = -B x)
+  and the fit's sigma:
+  * FDT violation of each node: `pipeline_analytical_fdt_integral(B, sigma
+    * ones, normalizations=False)`, the integral violation with fdt_eeg's
+    defaults (tmax 100 s, ts 0, Gaussian V0 of SD 0.05, not thermalised). 0
+    for a symmetric B. For linear_hopf B is the full 2N system and the N
+    observed (x) nodes are kept;
+  * EPR: `compute_entropy_production(B, compute_theoretical_covariance(B,
+    sigma), sigma)`, equal to the Phi above; legacy and network only.
+  Fits that are not stable (an eigenvalue of the jacobian with real part
+  >= 0) get no measures.
 
 ## 5. Differences from fdt_eeg
 

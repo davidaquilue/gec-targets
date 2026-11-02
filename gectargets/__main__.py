@@ -6,6 +6,8 @@ Command line:
     python -m gectargets fit     CONFIG [--task I | --all] [-j N]
     python -m gectargets check   CONFIG            are targets and fits complete
                                                    and readable (after a copy)
+    python -m gectargets downstream CONFIG [--task I | --all] [-j N]
+                                                   FDT / EPR of the fits
 
 ``--task`` defaults to $SLURM_ARRAY_TASK_ID and ``-j`` to
 $SLURM_CPUS_PER_TASK (else the config's n_jobs, else 1).
@@ -47,12 +49,12 @@ def check(cfg):
 def main():
     parser = argparse.ArgumentParser(prog="gectargets")
     parser.add_argument("command", choices=["tasks", "targets", "fit",
-                                            "check"])
+                                            "check", "downstream"])
     parser.add_argument("config")
     parser.add_argument("--task", type=int,
                         default=os.environ.get("SLURM_ARRAY_TASK_ID"))
     parser.add_argument("--all", action="store_true",
-                        help="fit every task, one after the other")
+                        help="run every task, one after the other")
     parser.add_argument("-j", "--n-jobs", type=int,
                         default=os.environ.get("SLURM_CPUS_PER_TASK"))
     args = parser.parse_args()
@@ -77,8 +79,12 @@ def main():
             selected = [tasks[int(args.task)]]
         else:
             parser.error("give --task ID or --all")
+        step = run_task
+        if args.command == "downstream":
+            from .downstream import run_downstream  # needs numba
+            step = run_downstream
         for task in selected:
-            run_task(cfg, task, n_jobs)
+            step(cfg, task, n_jobs)
 
 
 if __name__ == "__main__":

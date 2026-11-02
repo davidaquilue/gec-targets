@@ -1,0 +1,512 @@
+# %% [markdown]
+# # Study 4. Do the hyperparameters change the downstream measures?
+#
+# Study 2 asks how the learning rates change the fit; here, how they change
+# what is reported from a GEC: the analytical integral FDT violation of each
+# node (fdt_eeg's `pipeline_analytical_fdt_integral`) and the entropy
+# production rate (EPR, fdt_eeg's `compute_entropy_production`; legacy and
+# network models only, not linear_hopf). See gectargets/downstream.py for how
+# they are called. On the eps_fc x eps_fs grid of each dataset, variant and
+# model:
+# 1. how much the mean EPR and the mean FDT violation move across the grid,
+# 2. whether different learning rates order the subjects the same way,
+# 3. whether the measures follow the fit (of FS_A) or the data (the empirical
+#    FS_A),
+# 4. the paired contrast HCP working memory vs rest, cell by cell.
+#
+# Two cells are outlined in every grid figure: the lab's default learning
+# rates (`study4.lab_default` in the config, solid black) and the best fit of
+# FS_A (highest mean corr(emp, sim) of FS_A, dashed amber). Both are listed
+# in `selected_cells.csv` for later analyses.
+#
+# Needs: the fits of the config's sweep and their downstream measures
+# (`python -m gectargets downstream CONFIG --all`, or
+# hpc/downstream_array.sbatch); nothing is refitted. Run as a script
+# (`python studies/study4_downstream.py CONFIG`) or cell by cell. Outputs in
+# `<results_root>/studies/study4/`.
+
+# %% Setup
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.colors import Normalize
+from matplotlib.patches import Rectangle
+from scipy.stats import (false_discovery_control, rankdata, spearmanr,
+                         ttest_rel, wilcoxon)
+
+from gectargets.analysis import asym, triu
+from gectargets.config import expand_tasks, load_config, study_dir
+from gectargets.downstream import load_downstream, panel_key, selected_cells
+from gectargets.plotting import (DIVERGING, GRAY, corr_norm, heat_panel,
+                                 outline_legend, save)
+from gectargets.results import load_fits, load_targets
+
+CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/electrophysiology.json"
+X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # heatmap columns, rows
+CONTRAST = ("HCP_WMLR", "HCP_RESTLR")     # section 4: task, rest (paired)
+ALPHA = 0.05                              # section 4: BH level over the cells
+CELLS = {"lab_default": {"color": "#0b0b0b", "linestyle": "-",
+                         "label": "lab default"},
+         "best_fs_a": {"color": "#eda100", "linestyle": "--",
+                       "label": "best FS_A fit"}}
+MEASURES = {"fdt": "mean FDT violation", "epr": "EPR"}  # no EPR: linear_hopf
+CORR = (Normalize(-1, 1), DIVERGING)      # shared scale of correlation maps
+
+cfg = load_config(CONFIG)
+out = study_dir(cfg, "study4")
+
+tasks, fits, down = [], {}, {}
+for t in expand_tasks(cfg):
+    if (t["half"] != "all" or X_PARAM not in t["swept"]
+            or Y_PARAM not in t["swept"] or t["fit"]["convergence"] == "none"):
+        continue
+    f = load_fits(cfg, t, keys=("r_fs_a",))   # the matrices are not needed
+    d = None if f is None else load_downstream(cfg, t)
+    if d is None:
+        print(f"task {t['id']}: no {'fits' if f is None else 'downstream'} "
+              f"yet, skipped")
+        continue
+    tasks.append(t)
+    fits[t["id"]], down[t["id"]] = f, d
+print(f"{len(tasks)} grid tasks with downstream measures")
+
+
+def panel_name(key):
+    dataset, variant, model, extra = key
+    return " | ".join([dataset, variant, model]
+                      + [f"{k} {v:g}" if isinstance(v, float) else f"{k} {v}"
+                         for k, v in extra])
+
+
+# One row per task and subject; node FDT per task (subjects x nodes)
+frames, node_fdt = [], {}
+for t in tasks:
+    f, d = fits[t["id"]], down[t["id"]]
+    frames.append(pd.DataFrame({
+        "id": t["id"], "panel": panel_name(panel_key(t)),
+        "dataset": t["dataset"], "variant": t["variant"], "model": t["model"],
+        X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
+        "subject": d["subjects"], "stable": d["stable"].astype(bool),
+        "epr": d["epr"].astype(float), "fdt": d["fdt"].mean(axis=1),
+        "r_fs_a": pd.Series(f["r_fs_a"], index=f["subjects"])
+        .reindex(d["subjects"]).to_numpy(float)}))
+    node_fdt[t["id"]] = pd.DataFrame(d["fdt"], index=d["subjects"])
+data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+data.to_csv(out / "downstream_per_subject.csv", index=False)
+n_unstable = int((~data.stable).sum()) if len(data) else 0
+if n_unstable:
+    print(f"{n_unstable} unstable fits left out (no downstream measures)")
+
+by_panel = {}
+for t in tasks:
+    by_panel.setdefault(panel_key(t), []).append(t)
+cells = selected_cells(cfg, tasks, fits, X_PARAM, Y_PARAM)
+sel_rows = [{"panel": panel_name(key), "cell": name,
+             "id": None if t is None else t["id"],
+             X_PARAM: None if t is None else t["swept"][X_PARAM],
+             Y_PARAM: None if t is None else t["swept"][Y_PARAM],
+             "r_fs_a_mean": None if t is None
+             else float(np.nanmean(fits[t["id"]]["r_fs_a"]))}
+            for key, chosen in cells.items() for name, t in chosen.items()]
+selected = pd.DataFrame(sel_rows)
+selected.to_csv(out / "selected_cells.csv", index=False)
+with pd.option_context("display.width", 200, "display.precision", 3):
+    print(selected.to_string(index=False))
+
+
+def outlines(key):
+    return [{"cell": (t["swept"][Y_PARAM], t["swept"][X_PARAM]),
+             **CELLS[name]} for name, t in cells[key].items() if t is not None]
+
+
+def measures_of(d):
+    """Measures with values in d (no EPR for linear_hopf)."""
+    return [m for m in MEASURES if d[m].notna().any()]
+
+
+def grid_of(d, value):
+    return d.pivot(index=Y_PARAM, columns=X_PARAM, values=value)
+
+
+def spearman(a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    ok = np.isfinite(a) & np.isfinite(b)
+    return spearmanr(a[ok], b[ok]).statistic if ok.sum() >= 3 else np.nan
+
+
+def mean_row_corr(X, Y):
+    """Mean over subjects (rows) of corr(X_s, Y_s) (node patterns); rows
+    with NaN and constant rows are left out."""
+    X, Y = np.asarray(X, float), np.asarray(Y, float)
+    ok = np.isfinite(X).all(axis=1) & np.isfinite(Y).all(axis=1)
+    X = X[ok] - X[ok].mean(axis=1, keepdims=True)
+    Y = Y[ok] - Y[ok].mean(axis=1, keepdims=True)
+    den = np.sqrt((X ** 2).sum(axis=1) * (Y ** 2).sum(axis=1))
+    r = (X * Y).sum(axis=1)[den > 0] / den[den > 0]
+    return float(r.mean()) if len(r) else np.nan
+
+
+def figure(n_rows, n_cols):
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.4 * n_cols,
+                                                      3.0 * n_rows),
+                             squeeze=False)
+    return fig, axes
+
+
+def finish(fig, axes, path):
+    for ax in axes.flat:
+        if not ax.has_data():
+            ax.set_visible(False)
+    fig.tight_layout()
+    outline_legend(fig, CELLS.values())
+    save(fig, path)
+
+
+# %% [markdown]
+# ## 1. How much do the mean EPR and the mean FDT violation move?
+# Median over subjects of each measure (FDT: mean over nodes first), on the
+# grid. The spread ratio in the title is the SD of the cell medians over the
+# grid divided by the median, over cells, of the SD between subjects: above
+# 1, the learning rates move the measure more than subjects differ.
+
+# %%
+level_rows, spread_rows = [], []
+for key in by_panel:
+    d = data[(data.panel == panel_name(key)) & data.stable]
+    for m in measures_of(d):
+        stats = d.groupby([Y_PARAM, X_PARAM])[m].agg(
+            median="median", sd="std", n="count").reset_index()
+        level_rows += [{"panel": panel_name(key), "measure": m, **r}
+                       for r in stats.to_dict("records")]
+        at = {name: d[d.id == t["id"]][m].median()
+              for name, t in cells[key].items() if t is not None}
+        spread_rows.append({
+            "panel": panel_name(key), "measure": m, "n_cells": len(stats),
+            "median_min": stats["median"].min(),
+            "median_max": stats["median"].max(),
+            "spread_ratio": stats["median"].std() / stats["sd"].median(),
+            **{f"median_{name}": v for name, v in at.items()}})
+level = pd.DataFrame(level_rows)
+level.to_csv(out / "1_level_per_cell.csv", index=False)
+spread = pd.DataFrame(spread_rows)
+spread.to_csv(out / "1_spread.csv", index=False)
+with pd.option_context("display.width", 200, "display.precision", 3):
+    print(spread.to_string(index=False))
+
+if len(level):
+    fig, axes = figure(len(by_panel), len(MEASURES))
+    for row, key in zip(axes, by_panel):
+        for ax, m in zip(row, MEASURES):
+            lv = level[(level.panel == panel_name(key)) & (level.measure == m)]
+            if not len(lv):
+                continue
+            ratio = spread[(spread.panel == panel_name(key))
+                           & (spread.measure == m)].spread_ratio.iloc[0]
+            grid = grid_of(lv, "median")
+            heat_panel(ax, grid, f"{panel_name(key)}\n{MEASURES[m]}: median "
+                       f"(spread ratio {ratio:.2g})",
+                       *corr_norm(grid.to_numpy(float)), ".2g",
+                       outlines=outlines(key))
+    finish(fig, axes, out / "1_level.png")
+
+
+# %% [markdown]
+# ## 2. Do the learning rates order the subjects the same way?
+# Against each outlined cell (the reference), for every cell of the grid:
+# the Spearman correlation over subjects of EPR and of the mean FDT, and the
+# mean over subjects of the correlation between the node patterns of FDT
+# (the reference cell itself is 1). A change of level that keeps the order
+# is harmless for between-subject analyses.
+
+# %%
+def node_pattern(ref_id, cell_id):
+    a, b = node_fdt[ref_id], node_fdt[cell_id]
+    common = a.index.intersection(b.index)
+    return mean_row_corr(a.loc[common].to_numpy(), b.loc[common].to_numpy())
+
+
+ORDER = {"fdt": "mean FDT order", "fdt_nodes": "FDT node pattern",
+         "epr": "EPR order"}
+order_rows = []
+for key, group in by_panel.items():
+    d = data[(data.panel == panel_name(key)) & data.stable]
+    # subjects x cells, one table per measure
+    wide = {m: d.pivot(index="subject", columns="id", values=m)
+            for m in measures_of(d)}
+    for ref, rt in cells[key].items():
+        if rt is None:
+            continue
+        for t in group:
+            row = {"panel": panel_name(key), "reference": ref, "id": t["id"],
+                   X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM]}
+            for m, w in wide.items():
+                row[m] = (spearman(w[rt["id"]], w[t["id"]])
+                          if rt["id"] in w and t["id"] in w else np.nan)
+            row["fdt_nodes"] = node_pattern(rt["id"], t["id"])
+            order_rows.append(row)
+order = pd.DataFrame(order_rows)
+order.to_csv(out / "2_subject_order.csv", index=False)
+
+if len(order):
+    cols = [(ref, o) for ref in CELLS for o in ORDER]
+    fig, axes = figure(len(by_panel), len(cols))
+    for row, key in zip(axes, by_panel):
+        for ax, (ref, o) in zip(row, cols):
+            g = order[(order.panel == panel_name(key)) & (order.reference == ref)]
+            if not len(g) or o not in g or g[o].isna().all():
+                continue
+            heat_panel(ax, grid_of(g, o), f"{panel_name(key)}\n{ORDER[o]} "
+                       f"vs {CELLS[ref]['label']}", *CORR, ".2f",
+                       outlines=outlines(key))
+    finish(fig, axes, out / "2_subject_order.png")
+
+# Every cell against every cell: Spearman over subjects, cells ordered by
+# eps_fc then eps_fs; the outlined diagonal entries are the two cells.
+matrix_rows = []
+if len(data):
+    fig, axes = figure(len(by_panel), len(MEASURES))
+    for row, (key, group) in zip(axes, by_panel.items()):
+        d = data[(data.panel == panel_name(key)) & data.stable]
+        group = sorted(group, key=lambda t: (t["swept"][Y_PARAM],
+                                             t["swept"][X_PARAM]))
+        ids = [t["id"] for t in group]
+        for ax, m in zip(row, MEASURES):
+            if m not in measures_of(d):
+                continue
+            R = d.pivot(index="subject", columns="id", values=m)[ids].corr(
+                method="spearman")
+            matrix_rows += [{"panel": panel_name(key), "measure": m,
+                             "id_a": a, "id_b": b, "spearman": R.loc[a, b]}
+                            for a in ids for b in ids]
+            im = ax.imshow(R.to_numpy(), cmap=DIVERGING, vmin=-1, vmax=1,
+                           interpolation="nearest")
+            labels = [f"{t['swept'][Y_PARAM]:g} / {t['swept'][X_PARAM]:g}"
+                      for t in group]
+            ax.set_xticks(range(len(ids)), labels, rotation=90, fontsize=4)
+            ax.set_yticks(range(len(ids)), labels, fontsize=4)
+            for name, t in cells[key].items():
+                if t is not None:
+                    k = ids.index(t["id"])
+                    ax.add_patch(Rectangle((k - 0.5, k - 0.5), 1, 1,
+                                           fill=False, linewidth=1.5,
+                                           **{a: CELLS[name][a] for a in
+                                              ("color", "linestyle")}))
+            ax.set(title=f"{panel_name(key)}\n{MEASURES[m]}: Spearman "
+                         f"between cells", xlabel=f"{Y_PARAM} / {X_PARAM}")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
+    finish(fig, axes, out / "2_cell_by_cell.png")
+pd.DataFrame(matrix_rows).to_csv(out / "2_cell_by_cell.csv", index=False)
+
+
+# %% [markdown]
+# ## 3. Do the measures follow the fit or the data?
+# The data: the irreversibility of each subject's empirical targets, the
+# mean square of FS_A over the upper triangle, and per node sum_j FS_A_ij^2.
+# The fit: corr(empirical, simulated) of FS_A. Within each cell, over
+# subjects: Spearman(measure, fit) next to Spearman(measure, data), and the
+# mean over subjects of corr(node FDT, node empirical asymmetry). A measure
+# that follows the fit more than the data reflects the learning rates more
+# than the recordings. Below: the same over cells, mean fit vs median
+# measure.
+
+# %%
+empirical = {}
+for dataset, variant in dict.fromkeys((t["dataset"], t["variant"])
+                                      for t in tasks):
+    targets = load_targets(cfg, dataset, variant, keys=("fs",))
+    fs_a = asym(targets["fs"])
+    empirical[dataset, variant] = (
+        pd.Series(np.mean(triu(fs_a) ** 2, axis=-1),
+                  index=targets["subjects"]),
+        pd.DataFrame((fs_a ** 2).sum(axis=-1), index=targets["subjects"]))
+
+follow_rows = []
+for key, group in by_panel.items():
+    d = data[(data.panel == panel_name(key)) & data.stable]
+    power, nodes = empirical[key[0], key[1]]
+    for t in group:
+        dt = d[d.id == t["id"]].set_index("subject")
+        row = {"panel": panel_name(key), "id": t["id"],
+               X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
+               "r_fs_a_mean": dt.r_fs_a.mean()}
+        for m in measures_of(d):
+            row[f"{m}_median"] = dt[m].median()
+            row[f"{m}_vs_fit"] = spearman(dt[m], dt.r_fs_a)
+            row[f"{m}_vs_data"] = spearman(dt[m], power.loc[dt.index])
+        sim = node_fdt[t["id"]].loc[dt.index]
+        row["fdt_nodes_vs_data"] = mean_row_corr(
+            sim.to_numpy(), nodes.loc[dt.index].to_numpy())
+        follow_rows.append(row)
+follow = pd.DataFrame(follow_rows)
+follow.to_csv(out / "3_fit_vs_data.csv", index=False)
+
+FOLLOW = {"fdt_vs_fit": "mean FDT vs fit", "fdt_vs_data": "mean FDT vs data",
+          "fdt_nodes_vs_data": "FDT node pattern vs data",
+          "epr_vs_fit": "EPR vs fit", "epr_vs_data": "EPR vs data"}
+if len(follow):
+    fig, axes = figure(len(by_panel), len(FOLLOW))
+    for row, key in zip(axes, by_panel):
+        g = follow[follow.panel == panel_name(key)]
+        for ax, (col, title) in zip(row, FOLLOW.items()):
+            if col not in g or g[col].isna().all():
+                continue
+            heat_panel(ax, grid_of(g, col), f"{panel_name(key)}\n{title}",
+                       *CORR, ".2f", outlines=outlines(key))
+    finish(fig, axes, out / "3_fit_vs_data.png")
+
+    fig, axes = figure(len(by_panel), len(MEASURES))
+    for row, key in zip(axes, by_panel):
+        g = follow[follow.panel == panel_name(key)]
+        for ax, m in zip(row, MEASURES):
+            if f"{m}_median" not in g or g[f"{m}_median"].isna().all():
+                continue
+            ax.scatter(g.r_fs_a_mean, g[f"{m}_median"], s=14, color=GRAY)
+            for name, t in cells[key].items():
+                if t is not None:
+                    c = g[g.id == t["id"]]
+                    ax.scatter(c.r_fs_a_mean, c[f"{m}_median"], s=60,
+                               facecolor="none", linewidth=1.5,
+                               edgecolor=CELLS[name]["color"],
+                               linestyle=CELLS[name]["linestyle"])
+            rho = spearman(g.r_fs_a_mean, g[f"{m}_median"])
+            ax.set(title=f"{panel_name(key)}\nover cells: Spearman "
+                         f"{rho:.2f}", xlabel="mean corr(emp, sim) FS_A",
+                   ylabel=f"median {MEASURES[m]}")
+    finish(fig, axes, out / "3_fit_vs_measure_over_cells.png")
+
+
+# %% [markdown]
+# ## 4. HCP working memory vs rest, paired
+# The two datasets are fitted on the same grid; cells are matched by their
+# settings, subjects by their id (those with a stable fit in both). In every
+# cell, task - rest: paired t-test with its effect size Cohen's d_z =
+# mean(diff) / SD(diff), and, as a check without normality, the Wilcoxon
+# signed-rank test with the matched-pairs rank-biserial r. The heatmap
+# shows d_z; * marks the cells whose paired t-test passes Benjamini-Hochberg
+# at ALPHA over the cells of the grid. Outlined: the lab default and the
+# best FS_A fit averaged over the two conditions. Note: tau is fitted per
+# dataset, so the two conditions are fitted at different lags.
+
+# %%
+def rank_biserial(diff):
+    diff = diff[diff != 0]
+    ranks = rankdata(np.abs(diff))
+    plus, minus = ranks[diff > 0].sum(), ranks[diff < 0].sum()
+    return (plus - minus) / (plus + minus) if len(diff) else np.nan
+
+
+task_ds, rest_ds = CONTRAST
+pairs = {}
+for t in tasks:
+    if t["dataset"] != rest_ds:
+        continue
+    u = next((u for u in tasks if u["dataset"] == task_ds
+              and (u["variant"], u["model"], u["tag"])
+              == (t["variant"], t["model"], t["tag"])), None)
+    if u is not None:
+        pairs.setdefault(panel_key(t), []).append((u, t))
+
+def contrast_name(key):
+    return f"{task_ds} vs {rest_ds} | " + panel_name(key).split(" | ", 1)[1]
+
+
+contrast_rows = []
+for key, group in pairs.items():
+    name = contrast_name(key)
+    for u, t in group:
+        a = data[(data.id == u["id"]) & data.stable].set_index("subject")
+        b = data[(data.id == t["id"]) & data.stable].set_index("subject")
+        common = a.index.intersection(b.index)
+        row = {"panel": name, "id_task": u["id"], "id_rest": t["id"],
+               X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
+               "n_subjects": len(common),
+               "r_fs_a_mean": (a.r_fs_a.mean() + b.r_fs_a.mean()) / 2}
+        for m in measures_of(data[data.id.isin([u["id"], t["id"]])]):
+            x, y = a.loc[common, m].to_numpy(), b.loc[common, m].to_numpy()
+            diff = x - y
+            if len(diff) < 3:
+                continue
+            row.update({f"{m}_task_mean": x.mean(), f"{m}_rest_mean": y.mean(),
+                        f"{m}_d_z": diff.mean() / diff.std(ddof=1),
+                        f"{m}_p_t": ttest_rel(x, y).pvalue,
+                        f"{m}_rank_biserial": rank_biserial(diff),
+                        f"{m}_p_wilcoxon": wilcoxon(x, y).pvalue})
+        contrast_rows.append(row)
+contrast = pd.DataFrame(contrast_rows)
+for m in MEASURES:
+    if f"{m}_p_t" not in contrast:
+        continue
+    contrast[f"{m}_q_t"] = np.nan
+    for panel, g in contrast.groupby("panel"):
+        ok = g[f"{m}_p_t"].notna()
+        if ok.any():
+            contrast.loc[g.index[ok], f"{m}_q_t"] = false_discovery_control(
+                g.loc[ok, f"{m}_p_t"])
+if len(contrast):
+    contrast.to_csv(out / "4_contrast_task_vs_rest.csv", index=False)
+    with pd.option_context("display.width", 220, "display.precision", 3):
+        print(contrast.to_string(index=False))
+else:
+    print(f"Section 4 skipped: no matching fits of {task_ds} and {rest_ds}")
+
+
+def contrast_outlines(key, g):
+    """Lab default (same learning rates for both conditions) and the best
+    FS_A fit averaged over the two conditions."""
+    marks = []
+    lab = cells.get(key, {}).get("lab_default")
+    if lab is not None:
+        marks.append({"cell": (lab["swept"][Y_PARAM], lab["swept"][X_PARAM]),
+                      **CELLS["lab_default"]})
+    best = g.loc[g.r_fs_a_mean.idxmax()]
+    marks.append({"cell": (best[Y_PARAM], best[X_PARAM]),
+                  **CELLS["best_fs_a"]})
+    return marks
+
+
+if len(contrast):
+    fig, axes = figure(len(pairs), len(MEASURES))
+    for row, key in zip(axes, pairs):
+        g = contrast[contrast.panel == contrast_name(key)]
+        marks = contrast_outlines(key, g)
+        for ax, m in zip(row, MEASURES):
+            if f"{m}_d_z" not in g or g[f"{m}_d_z"].isna().all():
+                continue
+            grid = grid_of(g, f"{m}_d_z")
+            vmax = np.nanmax(np.abs(grid.to_numpy(float)))
+            heat_panel(ax, grid, f"{g.panel.iloc[0]}\n{MEASURES[m]}: d_z "
+                       f"(task - rest)", Normalize(-vmax, vmax), DIVERGING,
+                       ".2f", outlines=marks)
+            q = grid_of(g, f"{m}_q_t").to_numpy(float)
+            for i, j in zip(*np.nonzero(q < ALPHA)):
+                ax.text(j + 0.88, i + 0.8, "*", ha="center", va="center",
+                        fontsize=9, color="#0b0b0b")
+    finish(fig, axes, out / "4_contrast_task_vs_rest.png")
+
+    # Per subject, rest -> task, at the two outlined cells
+    for key in pairs:
+        g = contrast[contrast.panel == contrast_name(key)]
+        marks = contrast_outlines(key, g)
+        has = [m for m in MEASURES if f"{m}_d_z" in g
+               and g[f"{m}_d_z"].notna().any()]
+        fig, axes = figure(len(has), len(marks))
+        for row, m in zip(axes, has):
+            for ax, mark in zip(row, marks):
+                c = g[np.isclose(g[Y_PARAM], mark["cell"][0])
+                      & np.isclose(g[X_PARAM], mark["cell"][1])].iloc[0]
+                a = data[(data.id == c.id_task) & data.stable].set_index(
+                    "subject")[m]
+                b = data[(data.id == c.id_rest) & data.stable].set_index(
+                    "subject")[m]
+                both = pd.concat([b, a], axis=1, join="inner").to_numpy()
+                ax.plot([0, 1], both.T, color=GRAY, linewidth=0.6, alpha=0.5)
+                ax.plot([0, 1], both.mean(axis=0), color=mark["color"],
+                        linestyle=mark["linestyle"], linewidth=2.5)
+                ax.set(xticks=[0, 1], xticklabels=[rest_ds, task_ds],
+                       ylabel=MEASURES[m], title=f"{mark['label']}: "
+                       f"d_z {c[f'{m}_d_z']:.2f}, q {c[f'{m}_q_t']:.2g}")
+        fig.suptitle(contrast_name(key))
+        fig.tight_layout()
+        save(fig, out / f"4_paired_{key[1]}_{key[2]}.png")

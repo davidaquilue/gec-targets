@@ -63,11 +63,14 @@
               "convergence": "legacy", "log_every": 10, "n_init": 1,
               "seed": 0, "split_half": false},
 
+  "_study4": "lab_default: the lab's default learning rates per model, outlined in the Study 4 figures (must be a cell of the eps_fc x eps_fs grid; null: not shown).",
+  "study4": {"lab_default": {"linear_hopf": {"eps_fc": 0.0001, "eps_fs": 0.0001}}},
+
   "sweep": [
     {
       "_comment": "Study 2: fix eps_fc, vary eps_fs (and the reverse)",
       "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
-      "models": ["network"],
+      "models": ["network", "linear_hopf"],
       "grid": {
         "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01],
         "eps_fs": [1e-4, 5e-4, 0.001, 0.005, 0.01]
@@ -76,6 +79,6 @@
 
     {"_comment": "Study 3: models at their default settings",
      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
-     "models": ["network"]}
+     "models": ["network", "linear_hopf"]}
   ]
 }

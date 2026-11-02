@@ -26,11 +26,10 @@ from gectargets.analysis import (TARGETS, asym, corr, gec_reliability,
                                  offdiag, triu)
 from gectargets.config import expand_tasks, load_config, study_dir
 from gectargets.fitting import START_ERROR, load_matrix
-from matplotlib.colors import LogNorm, Normalize, SymLogNorm
-from matplotlib.patches import Rectangle
+from matplotlib.colors import LogNorm, SymLogNorm
 
 from gectargets.plotting import (TARGET_COLORS, GRAY, DIVERGING, SEQUENTIAL,
-                                 save)
+                                 corr_norm, heat_panel, save)
 from gectargets.results import load_fits, load_targets
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
@@ -90,59 +89,6 @@ with pd.option_context("display.width", 220, "display.precision", 3):
 # because the error went up.
 
 # %%
-def heat_panel(ax, grid, title, norm, cmap, fmt, best=False):
-    """grid: DataFrame (Y_PARAM rows x X_PARAM columns), log-spaced values
-    drawn as equal cells, each annotated."""
-    Z = np.ma.masked_invalid(grid.to_numpy(float))
-    im = ax.pcolormesh(Z, cmap=cmap, norm=norm, edgecolors="#fcfcfb",
-                       linewidth=1.5)
-    for (i, j), v in np.ndenumerate(Z.filled(np.nan)):
-        if np.isfinite(v):
-            r, g, b = np.ravel(cmap(norm(v)))[:3]
-            ink = "#ffffff" if 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5 \
-                else "#0b0b0b"
-            text = fmt(v) if callable(fmt) else format(v, fmt)
-            ax.text(j + 0.5, i + 0.5, text, ha="center",
-                    va="center", fontsize=6, color=ink)
-    if best and Z.count():
-        i, j = np.unravel_index(np.ma.argmax(Z), Z.shape)
-        ax.add_patch(Rectangle((j, i), 1, 1, fill=False, edgecolor="#0b0b0b",
-                               linewidth=1.5))
-    ax.set(title=title, xlabel=X_PARAM, ylabel=Y_PARAM,
-           xticks=np.arange(grid.shape[1]) + 0.5,
-           yticks=np.arange(grid.shape[0]) + 0.5)
-    ax.set_xticklabels([f"{v:g}" for v in grid.columns], rotation=90)
-    ax.set_yticklabels([f"{v:g}" for v in grid.index])
-    ax.tick_params(length=0)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    cbar = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
-    if isinstance(norm, LogNorm):
-        ticks = [v for v in (10, 20, 50, 100, 200, 500, 1000, 2000, 5000)
-                 if norm.vmin <= v <= norm.vmax] or [norm.vmin, norm.vmax]
-        cbar.set_ticks(ticks, labels=[f"{v:g}" for v in ticks])
-        cbar.minorticks_off()
-    elif isinstance(norm, SymLogNorm):
-        top = int(np.floor(np.log10(norm.vmax)))
-        ticks = sorted({0} | {s * 10 ** k for k in range(top + 1)
-                              for s in (-1, 1)})
-        cbar.set_ticks(ticks, labels=[f"{v:g}" for v in ticks])
-        cbar.minorticks_off()
-
-
-def corr_norm(values):
-    """Diverging scale centred on 0 when the panel has both signs (FS_A can
-    be fitted with the wrong sign), else sequential over the panel's range,
-    so that a panel of positive correlations keeps its contrast."""
-    lo, hi = np.nanmin(values, initial=np.inf), np.nanmax(values, initial=-np.inf)
-    if not np.isfinite([lo, hi]).all():
-        return Normalize(-1, 1), DIVERGING
-    if lo < 0 < hi:
-        vmax = max(-lo, hi)
-        return Normalize(-vmax, vmax), DIVERGING
-    return Normalize(lo, hi), SEQUENTIAL
-
-
 def panel_name(t):
     """data_model plus the swept settings other than the two grid axes (the
     preprocessing options are already in the variant)."""

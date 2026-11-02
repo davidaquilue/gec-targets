@@ -2,6 +2,7 @@
 import json
 import os
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,10 @@ import pandas as pd
 from .config import expand_tasks, fit_dir, tau_scan_dir, targets_dir
 
 EPOCH_KEYS = ("fc_epochs", "fs_epochs")
+# Files are read in parallel: with one small file per subject, the time is
+# mostly the latency of opening each file (USB / network drives), which
+# threads overlap
+READ_THREADS = 16
 
 
 def save_npz(path, **arrays):
@@ -25,33 +30,50 @@ def is_complete(path):
     return path.exists() and zipfile.is_zipfile(path)
 
 
+def _read_npz(path, keys=None):
+    """Arrays of one .npz, only *keys* if given (the others are not read);
+    None if the file is missing or unreadable (truncated)."""
+    if not is_complete(path):
+        return None
+    with np.load(path) as z:
+        return {k: z[k] for k in z.files if keys is None or k in keys}
+
+
+def read_npz_files(paths, keys=None):
+    """_read_npz of every path, in parallel, in the order of *paths*."""
+    with ThreadPoolExecutor(READ_THREADS) as ex:
+        return list(ex.map(lambda p: _read_npz(p, keys), paths))
+
+
 def load_meta(cfg, dataset, variant):
     """meta.json of the targets: tau, theta, sfreq, subjects, groups, ..."""
     with open(targets_dir(cfg, dataset, variant) / "meta.json") as f:
         return json.load(f)
 
 
-def _stack_subjects(directory, subjects, dtype=None):
-    """Every array of the subjects' .npz files, stacked over subjects.
+def _stack_subjects(directory, subjects, dtype=None, keys=None):
+    """Every array (or only *keys*) of the subjects' .npz files, stacked
+    over subjects.
 
     "fc_epochs", "fs_epochs" (if any subject has them): object arrays of one
     (n_epochs, N, N) array per subject, None for single-epoch subjects."""
-    data, epochs = {}, {k: [] for k in EPOCH_KEYS}
-    for s in subjects:
-        path = directory / f"{s}.npz"
-        if not is_complete(path):
+    paths = [directory / f"{s}.npz" for s in subjects]
+    loaded = read_npz_files(paths, keys)
+    for path, z in zip(paths, loaded):
+        if z is None:
             raise FileNotFoundError(
                 f"{path} is missing or unreadable (truncated, e.g. by an "
                 f"interrupted copy): copy it again, or delete it and compute "
                 f"it again. `python -m gectargets check CONFIG` lists all such "
                 f"files.")
-        with np.load(path) as z:
-            for k in z.files:
-                if k not in EPOCH_KEYS:
-                    data.setdefault(k, []).append(z[k])
-            for k in EPOCH_KEYS:
-                epochs[k].append(np.asarray(z[k], dtype=dtype)
-                                 if k in z.files else None)
+    data, epochs = {}, {k: [] for k in EPOCH_KEYS}
+    for z in loaded:
+        for k, v in z.items():
+            if k not in EPOCH_KEYS:
+                data.setdefault(k, []).append(v)
+        for k in EPOCH_KEYS:
+            epochs[k].append(np.asarray(z[k], dtype=dtype) if k in z
+                             else None)
     out = {k: np.array(v, dtype=dtype) for k, v in data.items()}
     for k, v in epochs.items():
         if any(e is not None for e in v):
@@ -61,13 +83,14 @@ def _stack_subjects(directory, subjects, dtype=None):
     return out
 
 
-def load_targets(cfg, dataset, variant):
+def load_targets(cfg, dataset, variant, keys=None):
     """Targets of all subjects: dict of (n_subjects, N, N) arrays ("fc",
     "fs", "fc_odd", ...), the per-epoch "fc_epochs", "fs_epochs" (see
-    _stack_subjects), plus "n_epochs", "subjects", "groups", "meta"."""
+    _stack_subjects), plus "n_epochs", "subjects", "groups", "meta". keys:
+    read only these arrays (e.g. ("fs",): the epochs are the bulk)."""
     meta = load_meta(cfg, dataset, variant)
     out = _stack_subjects(targets_dir(cfg, dataset, variant),
-                          meta["subjects"])
+                          meta["subjects"], keys=keys)
     out.update(subjects=meta["subjects"], groups=np.array(meta["groups"]),
                meta=meta)
     return out
@@ -83,24 +106,28 @@ def load_tau_scan(cfg, dataset, variant, tau):
                            dtype=float)
 
 
-def load_fits(cfg, task):
+def load_fits(cfg, task, keys=None):
     """Fits of one task, stacked over the subjects that have a result.
 
-    Keys: every array saved by fitting.fit_subject; "history_*" entries are
-    lists (their length depends on when each subject stopped). Unreadable
-    (truncated) files are reported and left out; the fit step refits them.
+    Keys: every array saved by fitting.fit_subject, or only *keys* (much
+    faster when the matrices are not needed, e.g. ("r_fs_a",)); "history_*"
+    entries are lists (their length depends on when each subject stopped).
+    Unreadable (truncated) files are reported and left out; the fit step
+    refits them.
     """
     f_dir = fit_dir(cfg, task)
     files = sorted(f_dir.glob("*.npz"))
-    broken = [p for p in files if not zipfile.is_zipfile(p)]
+    loaded = read_npz_files(files, keys)
+    broken = [p for p, z in zip(files, loaded) if z is None]
     if broken:
         print(f"{f_dir}: {len(broken)} unreadable fit files left out "
               f"(refitted by the fit step): {[p.stem for p in broken]}")
     data, subjects = {}, []
-    for path in (p for p in files if p not in broken):
-        with np.load(path) as z:
-            for k in z.files:
-                data.setdefault(k, []).append(z[k])
+    for path, z in zip(files, loaded):
+        if z is None:
+            continue
+        for k, v in z.items():
+            data.setdefault(k, []).append(v)
         subjects.append(path.stem)
     if not subjects:
         return None
