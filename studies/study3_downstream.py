@@ -1,5 +1,5 @@
 # %% [markdown]
-# # Study 4. Do the hyperparameters change the downstream measures?
+# # Study 3. Do the hyperparameters change the downstream measures?
 #
 # Study 2 asks how the learning rates change the fit; here, how they change
 # what is reported from a GEC: the analytical integral FDT violation of each
@@ -15,15 +15,15 @@
 # 4. the paired contrast HCP working memory vs rest, cell by cell.
 #
 # Two cells are outlined in every grid figure: the lab's default learning
-# rates (`study4.lab_default` in the config, solid black) and the best fit of
+# rates (`study3.lab_default` in the config, solid black) and the best fit of
 # FS_A (highest mean corr(emp, sim) of FS_A, dashed amber). Both are listed
 # in `selected_cells.csv` for later analyses.
 #
 # Needs: the fits of the config's sweep and their downstream measures
 # (`python -m gectargets downstream CONFIG --all`, or
 # hpc/downstream_array.sbatch); nothing is refitted. Run as a script
-# (`python studies/study4_downstream.py CONFIG`) or cell by cell. Outputs in
-# `<results_root>/studies/study4/`.
+# (`python studies/study3_downstream.py CONFIG`) or cell by cell. Outputs in
+# `<results_root>/studies/study3/`.
 
 # %% Setup
 import sys
@@ -55,7 +55,7 @@ MEASURES = {"fdt": "mean FDT violation", "epr": "EPR"}  # no EPR: linear_hopf
 CORR = (Normalize(-1, 1), DIVERGING)      # shared scale of correlation maps
 
 cfg = load_config(CONFIG)
-out = study_dir(cfg, "study4")
+out = study_dir(cfg, "study3")
 
 tasks, fits, down = [], {}, {}
 for t in expand_tasks(cfg):
