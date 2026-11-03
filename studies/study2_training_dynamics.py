@@ -29,8 +29,8 @@ from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.fitting import START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
-from gectargets.plotting import (TARGET_COLORS, GRAY, DIVERGING, SEQUENTIAL,
-                                 corr_norm, dataset_label, figure_title,
+from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING,
+                                 SEQUENTIAL, dataset_label, figure_title,
                                  heat_panel, model_label, save)
 from gectargets.results import load_fits, load_targets, save_per_model
 
@@ -104,13 +104,11 @@ with pd.option_context("display.width", 220, "display.precision", 3):
 # Mean over subjects of corr(empirical, simulated) at the end of the fit, over
 # the grid of `X_PARAM` (columns) x `Y_PARAM` (rows). One row of panels per
 # dataset, model and any other swept setting (e.g. maxC); only tasks whose
-# sweep entry varies both parameters, and panels with at least two fits. A
-# panel whose correlations have both signs uses a diverging scale centred on
-# 0 (FS_A can be fitted with the wrong sign), any other a scale over its own
-# range; positive is always red and negative blue, darker = larger in
-# magnitude. Every cell is annotated and the outlined cell is the
-# best of the panel. Scales differ between panels: compare values, not
-# colours. The last panel is the median number of iterations: cells at the
+# sweep entry varies both parameters, and panels with at least two fits.
+# Every correlation panel shares one scale, -1 (blue) to 1 (red), so the
+# targets compare by colour: a paler FS_A row is a worse fit. Every cell is
+# annotated and the outlined cell is the best of the panel. The last panel is
+# the median number of iterations: cells at the
 # first check (2 x check_every) stopped as soon as they could, usually
 # because the error went up.
 
@@ -151,7 +149,7 @@ for model, ps in by_model(panels).items():
         for ax, key in zip(row, TARGETS):
             grid = g.pivot(index=Y_PARAM, columns=X_PARAM, values=f"r_{key}")
             heat_panel(ax, grid, f"{titles[name]}\n{key}: mean corr(emp, sim)",
-                       *corr_norm(grid.to_numpy(float)), ".2f", best=True)
+                       *CORR, ".2f", best=True)
         grid = g.pivot(index=Y_PARAM, columns=X_PARAM, values="n_iter_median")
         heat_panel(row[-1], grid, f"{titles[name]}\nmedian iterations",
                    LogNorm(max(np.nanmin(grid.to_numpy(float)), 1),
@@ -172,8 +170,8 @@ for model, ps in by_model(panels).items():
 # positive FC: FS over both directed entries (i, j) and (j, i) of each such
 # pair, FS_A over the upper triangle. Mean over subjects, on the grid of
 # section 1; a subject with fewer than MIN_EDGES edges of a sign is left out
-# of that cell (the table gives how many subjects are left). FC < 0 and
-# FC > 0 share one scale per target, so the two columns compare directly.
+# of that cell (the table gives how many subjects are left). One scale, -1
+# to 1, for every panel, as in section 1.
 # The first title gives the median share of edges with negative FC.
 
 # %%
@@ -232,18 +230,13 @@ for model, ps in by_model(sign_panels).items():
     for row, (name, g) in zip(axes, ps):
         grids = {c: g.pivot(index=Y_PARAM, columns=X_PARAM, values=c)
                  for c in SIGN_COLUMNS}
-        for target in ("FS", "FS_A"):
-            pair = [c for c, (k, _) in SIGN_COLUMNS.items() if k == target]
-            norm, cmap = corr_norm(np.concatenate(
-                [grids[c].to_numpy(float).ravel() for c in pair]))
-            for c in pair:
-                ax = row[list(SIGN_COLUMNS).index(c)]
-                title = f"{titles[name]}\n{c}: mean corr(emp, sim)"
-                if c == next(iter(SIGN_COLUMNS)):
-                    title = (f"{titles[name]}\n{c} "
-                             f"({g.neg_fc_share.median():.0%} of edges): "
-                             f"mean corr")
-                heat_panel(ax, grids[c], title, norm, cmap, ".2f", best=True)
+        for ax, c in zip(row, SIGN_COLUMNS):
+            title = f"{titles[name]}\n{c}: mean corr(emp, sim)"
+            if c == next(iter(SIGN_COLUMNS)):
+                title = (f"{titles[name]}\n{c} "
+                         f"({g.neg_fc_share.median():.0%} of edges): "
+                         f"mean corr")
+            heat_panel(ax, grids[c], title, *CORR, ".2f", best=True)
     finish(fig, model, "1b_negative_fc_edges.png")
 
 

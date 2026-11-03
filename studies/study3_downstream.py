@@ -40,9 +40,9 @@ from scipy.stats import (false_discovery_control, rankdata, spearmanr,
 from gectargets.analysis import asym, triu
 from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.downstream import load_downstream, panel_key, selected_cells
-from gectargets.plotting import (DIVERGING, GRAY, corr_norm, dataset_label,
-                                 figure_title, heat_panel, model_label,
-                                 outline_legend, save)
+from gectargets.plotting import (CORR, DIVERGING, GRAY, corr_norm,
+                                 dataset_label, figure_title, heat_panel,
+                                 model_label, outline_legend, save)
 from gectargets.results import load_fits, load_targets, save_per_model
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/electrophysiology.json"
@@ -54,7 +54,6 @@ CELLS = {"lab_default": {"color": "#0b0b0b", "linestyle": "-",
          "best_fs_a": {"color": "#eda100", "linestyle": "--",
                        "label": "best FS_A fit"}}
 MEASURES = {"fdt": "mean FDT violation", "epr": "EPR"}  # no EPR: linear_hopf
-CORR = (Normalize(-1, 1), DIVERGING)      # shared scale of correlation maps
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study3")

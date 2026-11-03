@@ -29,6 +29,9 @@ POSITIVE = LinearSegmentedColormap.from_list(
     "reds", ["#f8dcdc", "#f0a3a3", "#e66767", "#c44646", "#a32525"])
 NEGATIVE = LinearSegmentedColormap.from_list(
     "blues_r", ["#104281", "#2563b3", "#3987e5", "#8cb9f0", "#dbe8fa"])
+# Correlations: always -1 to 1, so that panels, targets and studies compare
+# by colour
+CORR = (Normalize(-1, 1), DIVERGING)
 # Unsigned quantities (counts, power): neutral grays, never read as a sign
 SEQUENTIAL = LinearSegmentedColormap.from_list(
     "grays", ["#e8e7e2", "#c3c2b7", "#898781", "#52514e", "#262523"])
