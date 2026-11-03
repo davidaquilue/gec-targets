@@ -22,13 +22,16 @@ Results: <fit_dir>/downstream/<subject>.npz, one per fitted subject.
 import numpy as np
 from joblib import Parallel, delayed, parallel_config
 
-from .config import fit_dir
+from .config import fit_dir, grid_settings, model_name
 from .fdt_eeg.analytic_fdt import pipeline_analytical_fdt_integral
 from .fdt_eeg.entropy import (compute_entropy_production,
                               compute_theoretical_covariance)
 from .results import is_complete, read_npz_files, save_npz
 
 EPR_MODELS = ("legacy", "network")
+# A best cell needs at least this share of the grid's most subjects fitted:
+# a mean over the few subjects that survive a too large step is no best
+MIN_FITTED = 0.9
 
 
 def downstream_dir(cfg, task):
@@ -89,21 +92,29 @@ def load_downstream(cfg, task):
 
 # ----------------------------------------------- cells singled out on a grid
 def panel_key(task, x="eps_fs", y="eps_fc"):
-    """Dataset, variant, model and the swept settings other than the grid
-    axes and the preprocessing (already in the variant): the tasks of one
-    eps_fc x eps_fs grid."""
-    extra = tuple(sorted((k, v) for k, v in task["swept"].items()
-                         if k not in (x, y, "envelope", "orthogonalize")))
-    return task["dataset"], task["variant"], task["model"], extra
+    """Dataset, variant, model (config.model_name: with the procedure, e.g.
+    "network_updated") and the other swept settings (config.grid_settings):
+    the tasks of one eps_fc x eps_fs grid."""
+    extra = tuple(sorted(grid_settings(task, (x, y)).items()))
+    return task["dataset"], task["variant"], model_name(task), extra
+
+
+def well_fitted(group, fits, min_fitted=MIN_FITTED):
+    """The tasks of a grid fitted for at least min_fitted of the subjects of
+    its most complete cell."""
+    n = max(len(fits[t["id"]]["subjects"]) for t in group)
+    return [t for t in group
+            if len(fits[t["id"]]["subjects"]) >= min_fitted * n]
 
 
 def selected_cells(cfg, tasks, fits, x="eps_fs", y="eps_fc"):
     """The two cells of each eps grid that the studies single out:
 
     lab_default  the learning rates of cfg["study3"]["lab_default"][model]
-                 (None if not set or not on the grid)
+                 (None if not set or not on the grid; only for the original
+                 procedure: the key is the model_name)
     best_fs_a    the highest mean corr(empirical, simulated) FS_A over
-                 subjects
+                 subjects, among the well_fitted cells
 
     tasks: the grid tasks; fits: task id -> load_fits result. Returns
     {panel_key: {"lab_default": task or None, "best_fs_a": task}}.
@@ -114,7 +125,8 @@ def selected_cells(cfg, tasks, fits, x="eps_fs", y="eps_fc"):
         panels.setdefault(panel_key(t, x, y), []).append(t)
     out = {}
     for key, group in panels.items():
-        best = max(group, key=lambda t: np.nanmean(fits[t["id"]]["r_fs_a"]))
+        best = max(well_fitted(group, fits),
+                   key=lambda t: np.nanmean(fits[t["id"]]["r_fs_a"]))
         rates = lab.get(key[2]) or {}
         default = None
         if rates.get(x) is not None and rates.get(y) is not None:

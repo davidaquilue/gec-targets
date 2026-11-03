@@ -8,12 +8,20 @@ initial matrix, i.e. the SC support):
     C += eps_fc (FC_emp - FC_sim) + eps_fs (FS_emp - FS_sim)
     C  = max(C, 0), then the model's normalisation
 
+``step_norm`` weighs the parts of the error in the step:
+    "none"        as above (original)
+    "rms"         C += eps_fc dFC + eps_fs (w_S dFS_S + w_A dFS_A), with
+                  w_k = rms(FC_emp) / rms(target_k) (off-diagonal, each
+                  subject's own targets): FS_S and FS_A pull as hard as FC,
+                  whatever their size, and eps_fc keeps its meaning.
+
 Convergence is checked every ``check_every`` iterations on an error E:
     "legacy"      E = mse(FC) + mse(FS) over the full matrices (original);
                   stop when (E_old - E) / E < tol (includes E increasing)
     "normalized"  E = sum over FC, FS_S, FS_A of mse / mean square of the
                   target (off-diagonal), so the small antisymmetric part
                   weighs as much as the rest. Same stopping rule.
+    "fc_fs_a"     as "normalized", over FC and FS_A only.
     "none"        run all ``max_iter`` iterations (to study the dynamics)
 Since mse(FS) = mse(FS_S) + mse(FS_A) exactly, the legacy error already
 contains FS_A, but with the weight of its (small) size.
@@ -40,6 +48,17 @@ from .results import is_complete, save_npz
 HISTORY_KEYS = ("iter", "error", "r_fc", "r_fs", "r_fs_s", "r_fs_a",
                 "mse_fc", "mse_fs", "mse_fs_s", "mse_fs_a")
 START_ERROR = 1e5  # SETOLDERROR in the MATLAB code
+# Parts of the error E of the normalised rules; "legacy" and "none" are not
+# normalised
+NORMALIZED_RULES = {"normalized": ("fc", "fs_s", "fs_a"),
+                    "fc_fs_a": ("fc", "fs_a")}
+CONVERGENCE_RULES = ("legacy", "none", *NORMALIZED_RULES)
+STEP_NORMS = ("none", "rms")
+
+
+def edge_parts(fc, fs):
+    """Upper triangle of FC, FS_S and FS_A."""
+    return {"fc": triu(fc), "fs_s": triu(sym(fs)), "fs_a": triu(asym(fs))}
 
 
 def fit_metrics(fc_emp, fs_emp, fc_sim, fs_sim):
@@ -59,20 +78,28 @@ def fit_metrics(fc_emp, fs_emp, fc_sim, fs_sim):
 
 
 def rule_error(rule, fc_emp, fs_emp, fc_sim, fs_sim):
-    if rule == "normalized":
-        terms = [(triu(fc_emp), triu(fc_sim)),
-                 (triu(sym(fs_emp)), triu(sym(fs_sim))),
-                 (triu(asym(fs_emp)), triu(asym(fs_sim)))]
-        return float(sum(np.mean((e - s) ** 2) / np.mean(e ** 2)
-                         for e, s in terms))
+    if rule in NORMALIZED_RULES:
+        emp, sim = edge_parts(fc_emp, fs_emp), edge_parts(fc_sim, fs_sim)
+        return float(sum(np.mean((emp[k] - sim[k]) ** 2) / np.mean(emp[k] ** 2)
+                         for k in NORMALIZED_RULES[rule]))
     return float(np.mean((fc_emp - fc_sim) ** 2)
                  + np.mean((fs_emp - fs_sim) ** 2))
 
 
+def step_weights(step_norm, fc_emp, fs_emp):
+    """Weights of the FC, FS_S and FS_A errors in the learning step."""
+    if step_norm == "none":
+        return np.ones(3)
+    rms = {k: np.sqrt(np.mean(v ** 2))
+           for k, v in edge_parts(fc_emp, fs_emp).items()}
+    return np.array([1.0, rms["fc"] / rms["fs_s"], rms["fc"] / rms["fs_a"]])
+
+
 def fit_gec(fc_emp, fs_emp, model, C0, tau_s, eps_fc, eps_fs,
             max_iter=5000, tol=1e-5, check_every=10, convergence="legacy",
-            log_every=10, **_):
+            step_norm="none", log_every=10, **_):
     """Fit one subject. Returns coupling C, simulated FC / FS, history."""
+    weights = step_weights(step_norm, fc_emp, fs_emp)
     C = model.prepare(C0)
     mask = (C > 0) & ~np.eye(len(C), dtype=bool)
     history = {k: [] for k in HISTORY_KEYS}
@@ -96,14 +123,20 @@ def fit_gec(fc_emp, fs_emp, model, C0, tau_s, eps_fc, eps_fs,
                 break
             old_error = error
 
-        step = eps_fc * (fc_emp - fc_sim) + eps_fs * (fs_emp - fs_sim)
+        if step_norm == "none":   # as written, to keep the original fits
+            step = eps_fc * (fc_emp - fc_sim) + eps_fs * (fs_emp - fs_sim)
+        else:
+            d_fs = fs_emp - fs_sim
+            step = (eps_fc * weights[0] * (fc_emp - fc_sim)
+                    + eps_fs * (weights[1] * sym(d_fs)
+                                + weights[2] * asym(d_fs)))
         C = C + np.where(mask, step, 0.0)
         C = model.normalize(np.where(mask & (C < 0), 0.0, C))
 
     # Observables of the returned C (the loop's last ones may lag one step)
     fc_sim, fs_sim = model.observables(C, tau_s)
     return {"C": C, "fc_sim": fc_sim, "fs_sim": fs_sim, "mask": mask,
-            "n_iter": it, "stop": stop,
+            "n_iter": it, "stop": stop, "step_weights": weights,
             "history": {k: np.asarray(v) for k, v in history.items()}}
 
 
@@ -154,6 +187,7 @@ def fit_subject(task, meta, target_file, sc, out_file):
         out_file, C=C, friction=model.friction(C), jacobian=model.jacobian(C),
         fc_sim=fc_sim, fs_sim=fs_sim, mask=first["mask"],
         n_iter=first["n_iter"], stop=first["stop"],
+        step_weights=first["step_weights"],
         n_success=len(runs), n_init=len(inits),
         runtime_s=time.time() - start, sigma=model.sigma,
         **fit_metrics(fc_emp, fs_emp, fc_sim, fs_sim),
@@ -165,6 +199,12 @@ def fit_subject(task, meta, target_file, sc, out_file):
 def run_task(cfg, task, n_jobs=1):
     """Fit every subject of one task in parallel; finished subjects are
     skipped, so an interrupted task can simply be resubmitted."""
+    # Checked here: inside the fit a ValueError is a failed subject
+    for key, allowed in (("convergence", CONVERGENCE_RULES),
+                         ("step_norm", STEP_NORMS)):
+        if task["fit"].get(key, allowed[0]) not in allowed:
+            raise ValueError(f"{key} '{task['fit'][key]}' is not one of "
+                             f"{allowed}")
     t_dir = targets_dir(cfg, task["dataset"], task["variant"])
     if not (t_dir / "meta.json").exists():
         raise FileNotFoundError(f"No targets in {t_dir}: run the 'targets' "

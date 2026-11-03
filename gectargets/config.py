@@ -20,8 +20,16 @@ load_dotenv()
 PREPROCESSING_KEYS = ("envelope", "orthogonalize")
 # Settings of the fitting loop (everything else in a model block is a model
 # parameter, passed to the model class)
-FIT_KEYS = ("eps_fc", "eps_fs", "max_iter", "tol",
-            "check_every", "convergence", "log_every", "n_init", "seed")
+FIT_KEYS = ("eps_fc", "eps_fs", "max_iter", "tol", "check_every",
+            "convergence", "step_norm", "log_every", "n_init", "seed")
+# Fitting settings added after the first fits, with the default that gives
+# the original fit. At that default they are left out of the task, so the
+# folders (hash) of the earlier fits do not change
+LATER_FIT_DEFAULTS = {"step_norm": "none"}
+# Fitting procedures besides the original one: name -> the fitting settings
+# that define it. The studies show a model fitted with one of them as a model
+# of its own, "<model>_<name>" (own folders and figure titles)
+PROCEDURES = {"updated": {"step_norm": "rms", "convergence": "fc_fs_a"}}
 HALVES_SPLIT = ("all", "odd", "even")
 
 
@@ -88,7 +96,8 @@ def _fmt(value):
 def run_tag(model_params, fit):
     """Folder name of one hyperparameter set: readable part + short hash.
 
-    The readable part lists the model parameters and learning rates; the hash
+    The readable part lists the model parameters, learning rates and the
+    later fitting settings when not at their default (``step_norm``); the hash
     covers every setting, so two runs differing only in, e.g., ``max_iter``
     never share a folder. Input files (``*_path``, e.g. the Hopf frequencies)
     are left out: like the SC and the targets they are inputs of the dataset,
@@ -97,7 +106,9 @@ def run_tag(model_params, fit):
     must be deleted by hand.
     """
     params = {k: v for k, v in model_params.items() if not k.endswith("_path")}
-    shown = dict(params, **{k: fit[k] for k in ("eps_fc", "eps_fs")})
+    shown = dict(params, **{k: fit[k] for k in ("eps_fc", "eps_fs",
+                                                *LATER_FIT_DEFAULTS)
+                            if k in fit})
     text = "_".join(f"{k}-{_fmt(v)}" for k, v in sorted(shown.items()))
     digest = hashlib.md5(json.dumps(
         {"model": params, "fit": fit}, sort_keys=True, default=str
@@ -111,7 +122,7 @@ def _make_task(cfg, dataset, model, swept, half):
         raise KeyError(f"Dataset '{dataset}' is not defined in 'datasets'")
     if model not in cfg["models"]:
         raise KeyError(f"Model '{model}' is not defined in 'models'")
-    defaults = {**cfg["fitting"], **cfg["models"][model]}
+    defaults = {**LATER_FIT_DEFAULTS, **cfg["fitting"], **cfg["models"][model]}
     unknown = set(swept) - set(defaults) - set(PREPROCESSING_KEYS)
     if unknown:
         raise KeyError(f"Swept keys {sorted(unknown)} are neither fitting "
@@ -120,7 +131,9 @@ def _make_task(cfg, dataset, model, swept, half):
     merged = {**defaults, **swept}
     prep = {k: swept.get(k, cfg["preprocessing"][k])
             for k in PREPROCESSING_KEYS}
-    fit = {k: merged[k] for k in FIT_KEYS if k in merged}
+    fit = {k: merged[k] for k in FIT_KEYS if k in merged
+           and not (k in LATER_FIT_DEFAULTS
+                    and merged[k] == LATER_FIT_DEFAULTS[k])}
     model_params = {k: v for k, v in merged.items()
                     if k not in FIT_KEYS and k not in cfg["fitting"]
                     and k not in PREPROCESSING_KEYS}
@@ -172,6 +185,30 @@ def expand_tasks(cfg):
     for i, task in enumerate(tasks):
         task["id"] = i
     return tasks
+
+
+def procedure(task):
+    """Name of the task's fitting procedure: a key of PROCEDURES, or
+    "original"."""
+    for name, settings in PROCEDURES.items():
+        if all(task["fit"].get(k) == v for k, v in settings.items()):
+            return name
+    return "original"
+
+
+def model_name(task):
+    """The model as the studies group and show it: "network", or e.g.
+    "network_updated" for a fit with another procedure."""
+    name = procedure(task)
+    return task["model"] if name == "original" else f"{task['model']}_{name}"
+
+
+def grid_settings(task, axes=("eps_fs", "eps_fc")):
+    """The swept settings that tell apart the grids of one dataset, variant
+    and model_name: all but the grid axes, the preprocessing (in the
+    variant) and the settings of the procedure (in model_name)."""
+    skip = {*axes, *PREPROCESSING_KEYS, *PROCEDURES.get(procedure(task), {})}
+    return {k: v for k, v in task["swept"].items() if k not in skip}
 
 
 def target_variants(cfg):

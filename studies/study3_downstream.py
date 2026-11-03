@@ -16,15 +16,18 @@
 #
 # Two cells are outlined in every grid figure: the lab's default learning
 # rates (`study3.lab_default` in the config, solid black) and the best fit of
-# FS_A (highest mean corr(emp, sim) of FS_A, dashed amber). Both are listed
-# in `selected_cells.csv` for later analyses.
+# FS_A (highest mean corr(emp, sim) of FS_A among the cells with most
+# subjects fitted, dashed amber). Both are listed in `selected_cells.csv`
+# for later analyses.
 #
 # Needs: the fits of the config's sweep and their downstream measures
 # (`python -m gectargets downstream CONFIG --all`, or
 # hpc/downstream_array.sbatch); nothing is refitted. Run as a script
 # (`python studies/study3_downstream.py CONFIG`) or cell by cell. Outputs in
 # `<results_root>/studies/study3/<model>/`, one folder per model (figures
-# and tables of that model only).
+# and tables of that model only). A model fitted with another procedure
+# (config.PROCEDURES) is a model of its own, e.g. `network_updated`, without
+# a lab default.
 
 # %% Setup
 import sys
@@ -38,7 +41,8 @@ from scipy.stats import (false_discovery_control, rankdata, spearmanr,
                          ttest_rel, wilcoxon)
 
 from gectargets.analysis import asym, triu
-from gectargets.config import expand_tasks, load_config, model_dir, study_dir
+from gectargets.config import (expand_tasks, load_config, model_dir,
+                               model_name, study_dir)
 from gectargets.downstream import load_downstream, panel_key, selected_cells
 from gectargets.plotting import (CORR, DIVERGING, GRAY, corr_norm,
                                  dataset_label, figure_title, heat_panel,
@@ -109,7 +113,8 @@ for t in tasks:
     f, d = fits[t["id"]], down[t["id"]]
     frames.append(pd.DataFrame({
         "id": t["id"], "panel": panel_name(panel_key(t)),
-        "dataset": t["dataset"], "variant": t["variant"], "model": t["model"],
+        "dataset": t["dataset"], "variant": t["variant"],
+        "model": model_name(t),
         X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
         "subject": d["subjects"], "stable": d["stable"].astype(bool),
         "epr": d["epr"].astype(float), "fdt": d["fdt"].mean(axis=1),

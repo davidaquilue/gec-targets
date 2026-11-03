@@ -19,6 +19,8 @@ MODEL_LABELS = {"legacy": "Legacy model", "network": "Network model",
 DATASET_LABELS = {"UCM_AAL": "UCM MEG (AAL)", "UniRoma": "UniRoma EEG",
                   "ADNI_Schaefer400": "ADNI fMRI (Schaefer 400)",
                   "HCP_RESTLR": "HCP rest", "HCP_WMLR": "HCP working memory"}
+# Fitting procedures (config.PROCEDURES), shown after the model's name
+PROCEDURE_LABELS = {"updated": "updated fit"}
 
 DIVERGING = LinearSegmentedColormap.from_list(
     "blue_gray_red", ["#104281", "#3987e5", "#f0efec", "#e66767", "#a32525"])
@@ -51,6 +53,10 @@ plt.rcParams.update({
 
 
 def model_label(name):
+    """Label of a model, or of "<model>_<procedure>" (config.model_name)."""
+    model, _, proc = name.rpartition("_")
+    if model and proc in PROCEDURE_LABELS:
+        return f"{MODEL_LABELS.get(model, model)}, {PROCEDURE_LABELS[proc]}"
     return MODEL_LABELS.get(name, name)
 
 

@@ -26,7 +26,8 @@ import pandas as pd
 
 from gectargets.analysis import (TARGETS, asym, corr, edge_vectors,
                                  gec_reliability, offdiag, triu)
-from gectargets.config import expand_tasks, load_config, model_dir, study_dir
+from gectargets.config import (expand_tasks, grid_settings, load_config,
+                               model_dir, model_name, study_dir)
 from gectargets.fitting import START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
@@ -58,7 +59,10 @@ print(f"{len(tasks)} tasks with results")
 
 
 def label(t):
-    return f"{t['dataset']} | {t['variant']} | {t['model']}"
+    """Dataset, variant and model; a fit with another procedure than the
+    original (config.PROCEDURES) is a model of its own, e.g.
+    "network_updated", with its own folder and figures."""
+    return f"{t['dataset']} | {t['variant']} | {model_name(t)}"
 
 
 def by_model(panels):
@@ -87,7 +91,7 @@ def finish(fig, model, name):
 rows = []
 for t in tasks:
     f = fits[t["id"]]
-    rows.append({"id": t["id"], "data_model": label(t), "model": t["model"],
+    rows.append({"id": t["id"], "data_model": label(t), "model": model_name(t),
                  **{k: t["fit"][k] for k in ("eps_fc", "eps_fs",
                                               "convergence")},
                  **t["model_params"], "n_subjects": len(f["subjects"]),
@@ -116,9 +120,9 @@ with pd.option_context("display.width", 220, "display.precision", 3):
 # %%
 def panel_name(t):
     """data_model plus the swept settings other than the two grid axes (the
-    preprocessing options are already in the variant)."""
-    extra = {k: v for k, v in t["swept"].items()
-             if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
+    preprocessing options are already in the variant, the procedure in the
+    model)."""
+    extra = grid_settings(t, (X_PARAM, Y_PARAM))
     return " | ".join([label(t)] + settings(extra))
 
 
@@ -129,8 +133,7 @@ def settings(extra):
 
 def panel_title(t):
     """Title of a panel in the figures; the model is the figure's title."""
-    extra = {k: v for k, v in t["swept"].items()
-             if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
+    extra = grid_settings(t, (X_PARAM, Y_PARAM))
     return " | ".join([dataset_label(t["dataset"]), t["variant"]]
                       + settings(extra))
 
@@ -223,7 +226,7 @@ for t in tasks:
             select = fc_edges < 0 if op == "<" else fc_edges > 0
             values[column].append(corr_on(emp, sim, select))
     sign_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
-                      "model": t["model"],
+                      "model": model_name(t),
                       X_PARAM: t["swept"][X_PARAM],
                       Y_PARAM: t["swept"][Y_PARAM],
                       "neg_fc_share": np.median(neg_share),
@@ -276,7 +279,7 @@ for t in tasks:
     power = {k: np.mean(v ** 2, axis=-1) for k, v in
              edge_vectors(fc_emp[rows_of], fs_emp[rows_of]).items()}
     nmse_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
-                      "model": t["model"],
+                      "model": model_name(t),
                       X_PARAM: t["swept"][X_PARAM],
                       Y_PARAM: t["swept"][Y_PARAM],
                       **{f"nmse_{k}": float(np.nanmean(f[f"mse_{v}"]
@@ -340,7 +343,7 @@ selected = TRAJECTORY_TASKS or [t["id"] for t in tasks
 sel_tasks = {}
 for t in tasks:
     if t["id"] in selected:
-        sel_tasks.setdefault(t["model"], []).append(t)
+        sel_tasks.setdefault(model_name(t), []).append(t)
 for model, group in sel_tasks.items():
     fig, axes = figure(len(group), len(TARGETS))
     for row, t in zip(axes, group):
@@ -381,7 +384,9 @@ for model, group in sel_tasks.items():
 #   went up).
 #
 # "rule" is E itself (<= 1 by construction, unless the fit ran to
-# `max_iter`). Runs with `convergence: "none"` are read at the iteration
+# `max_iter`); for a fit with another stopping rule (e.g. the updated fit:
+# normalised FC + FS_A, see config.PROCEDURES) it is that rule's error. Runs
+# with `convergence: "none"` are read at the iteration
 # where the default rule would have stopped. Heatmap: median over subjects,
 # one shared scale per row; table: also the fraction of subjects whose part
 # was still improving (ratio > 1).
@@ -420,7 +425,7 @@ for t in tasks:
     f = fits[t["id"]]
     window, tol = t["fit"]["check_every"], t["fit"]["tol"]
     stops = [stop_point(t, f, s) for s in range(len(f["subjects"]))]
-    row = {"id": t["id"], "data_model": label(t), "model": t["model"],
+    row = {"id": t["id"], "data_model": label(t), "model": model_name(t),
            **t["swept"], "convergence": t["fit"]["convergence"],
            "stop_iter_median": np.median(stops)}
     for part, key in PARTS.items():
@@ -479,7 +484,7 @@ for t in tasks:
         load_fits(cfg, {**t , "half": "odd"}),
         load_fits(cfg, {**t, "half": "even"}))
     rel_rows.append({"id": t["id"], "data_model": label(t),
-                     "model": t["model"], **t["swept"],
+                     "model": model_name(t), **t["swept"],
                      "convergence": t["fit"]["convergence"], **rel})
 reliability = pd.DataFrame(rel_rows)
 save_per_model(reliability, out, "4_gec_reliability.csv")

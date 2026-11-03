@@ -8,13 +8,14 @@ functional connectivity (FC) and the lagged covariance (FS), and their
 FS is split into a symmetric part `FS_S = (FS + FS')/2` and an antisymmetric
 part `FS_A = (FS - FS')/2`. Only FS_A carries the direction of time, so it is
 what a GEC needs to estimate irreversibility (entropy production, FDT
-violation). The three studies ask:
+violation). The four studies ask:
 
 | Study | Question | Script |
 |---|---|---|
 | 1 | What do FC, FS, FS_S and FS_A look like, how similar are they across subjects, and how reliable within a subject? | `studies/study1_empirical_targets.py` |
 | 2 | How does the fit evolve during training, and do FS_S / FS_A converge when the default rule stops? Which learning rates fit what? | `studies/study2_training_dynamics.py` |
 | 3 | How much do the learning rates move the downstream measures (analytical FDT violation, entropy production), do they keep the order of subjects, do the measures follow the fit or the data, and does HCP working memory vs rest hold on every grid cell? | `studies/study3_downstream.py` |
+| 4 | Does the updated fit (FS_S and FS_A errors scaled to the size of FC in the step, stopping rule on FC + FS_A only) fit FS_A better than the original at the lab default and at its best FS_A cell, at what cost to FC, and does it change the downstream measures and the HCP contrast? | `studies/study4_fitting_procedure.py` |
 
 The methods (preprocessing, models, learning rule, metrics) are written out in
 [docs/methods.md](docs/methods.md).
@@ -41,10 +42,11 @@ python -m gectargets downstream configs/fdt_datasets.json --all  #    FDT / EPR 
 python studies/study1_empirical_targets.py configs/fdt_datasets.json   # 3. analyses
 python studies/study2_training_dynamics.py configs/fdt_datasets.json
 python studies/study3_downstream.py        configs/electrophysiology.json
+python studies/study4_fitting_procedure.py configs/electrophysiology.json
 ```
 
-Figures and tables are written to `<results_root>/studies/study{1,2,3}/`;
-Studies 2 and 3 write one folder per model in theirs (`study2/<model>/`). The
+Figures and tables are written to `<results_root>/studies/study{1,2,3,4}/`;
+Studies 2 to 4 write one folder per model in theirs (`study2/<model>/`). The
 study scripts are split into `# %%` cells: open them in PyCharm, VS Code or
 Jupyter (jupytext) to run them step by step.
 
@@ -71,9 +73,9 @@ relative to the config file and may contain `$ENV_VARS`.
 | `bands` | band name -> `[f_low, f_high]` Hz |
 | `preprocessing` | `envelope`, `orthogonalize` (booleans), `tau` (`"FIT"` or samples) |
 | `models` | default parameters of each model, including its learning rates `eps_fc`, `eps_fs` |
-| `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `none`), `log_every`, `n_init`, `seed`, `split_half` |
+| `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `fc_fs_a` / `none`), `step_norm` (`none` / `rms`, default `none`), `log_every`, `n_init`, `seed`, `split_half` |
 | `sweep` | list of entries `{datasets, models, grid}`; each is the product datasets x models x grid. `grid` keys can be any model parameter, fitting setting or preprocessing option. `split_half: true` in an entry also fits odd and even epochs (3x the cost) |
-| `study3` | optional: `lab_default` -> per model `{eps_fc, eps_fs}`, the lab's default learning rates, outlined in the Study 3 figures (a cell of the grid) |
+| `study3` | optional: `lab_default` -> per model `{eps_fc, eps_fs}`, the lab's default learning rates, outlined in the Study 3 figures (a cell of the grid) and compared in Study 4 |
 
 ### Outputs
 
@@ -82,12 +84,27 @@ relative to the config file and may contain `$ENV_VARS`.
 <results_root>/<dataset>/<variant>/fits/<model>/<tag>/<half>/task.json, <subject>.npz
 <results_root>/<dataset>/<variant>/fits/<model>/<tag>/<half>/downstream/<subject>.npz
 <results_root>/studies/study1/...
-<results_root>/studies/study{2,3}/<model>/...
+<results_root>/studies/study{2,3,4}/<model>/...
 ```
 
 `variant` is the band plus `_env` / `_orth` (e.g. `alpha_env`, `nofilter`);
 `tag` lists the hyperparameters plus a short hash of all settings; `half` is
-`all`, `odd` or `even`.
+`all`, `odd` or `even`. A setting added after the first fits (`step_norm`)
+is left out of the tag at its default, so the folders of earlier fits do
+not change.
+
+### Fitting procedures
+
+The **updated** fit (`PROCEDURES` in `gectargets/config.py`) is the weighted
+step with the FC + FS_A stopping rule: `"step_norm": "rms", "convergence":
+"fc_fs_a"`. The last sweep entries of `configs/electrophysiology.json` and
+`configs/fmri.json` fit it on the Study 2 grids; they come after the
+existing tasks, so the task ids of the earlier fits do not change. Studies 2
+and 3 show a model fitted with it as a model of its own, `<model>_updated`
+(own folders, e.g. `study2/network_updated/`, and figure titles; no lab
+default). Study 4 compares, per dataset, variant and model, the original fit
+at the lab default and at its best FS_A cell with the updated fit at its best
+FS_A cell.
 
 ## High-performance computing
 
