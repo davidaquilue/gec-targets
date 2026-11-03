@@ -35,6 +35,10 @@ CORR = (Normalize(-1, 1), DIVERGING)
 # Unsigned quantities (counts, power): neutral grays, never read as a sign
 SEQUENTIAL = LinearSegmentedColormap.from_list(
     "grays", ["#e8e7e2", "#c3c2b7", "#898781", "#52514e", "#262523"])
+# Normalised mse (mse / mean square of the target): always 0 (perfect) to 1
+# (no better than predicting zero), as CORR; values above 1 take the darkest
+# gray
+NMSE = (Normalize(0, 1), SEQUENTIAL)
 
 plt.rcParams.update({
     "figure.dpi": 110, "savefig.dpi": 200, "savefig.bbox": "tight",
@@ -98,7 +102,8 @@ def heat_panel(ax, grid, title, norm, cmap, fmt, best=False, outlines=()):
     by DataFrame.pivot), log-spaced values drawn as equal cells, each
     annotated.
 
-    best: outline the largest cell in black. outlines: cells to mark, dicts
+    best: outline the largest cell in black ("min": the smallest, e.g. for
+    an error). outlines: cells to mark, dicts
     with "cell" (row value, column value), "color" and "linestyle"; a cell
     that is not on the grid is skipped. Marks are drawn inside their cell
     (two neighbours stay apart), several on one cell further inset."""
@@ -115,8 +120,8 @@ def heat_panel(ax, grid, title, norm, cmap, fmt, best=False, outlines=()):
                     va="center", fontsize=6, color=ink)
     marks = []
     if best and Z.count():
-        marks.append((*np.unravel_index(np.ma.argmax(Z), Z.shape),
-                      "#0b0b0b", "-"))
+        pick = np.ma.argmin if best == "min" else np.ma.argmax
+        marks.append((*np.unravel_index(pick(Z), Z.shape), "#0b0b0b", "-"))
     for o in outlines:
         i = np.flatnonzero(np.isclose(grid.index.to_numpy(float), o["cell"][0]))
         j = np.flatnonzero(np.isclose(grid.columns.to_numpy(float),

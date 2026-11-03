@@ -4,8 +4,9 @@
 # Every fit logs, every `log_every` iterations, the correlation between the
 # empirical and simulated FC, FS, FS_S and FS_A. Here we look at
 # 1. the final fit quality across hyperparameters (e.g. eps_fs at fixed
-#    eps_fc and the reverse), and (1b) the fit of FS and FS_A on the edges
-#    with negative FC, which the models cannot reproduce,
+#    eps_fc and the reverse), (1b) the fit of FS and FS_A on the edges
+#    with negative FC, which the models cannot reproduce, and (1c) the final
+#    error, which, unlike the correlation, also sees the scale,
 # 2. the trajectories of the four correlations during training,
 # 3. when the fit stops (its error, FC + FS, no longer improves), whether
 #    FC, FS, FS_S and FS_A have each stopped improving too,
@@ -23,13 +24,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from gectargets.analysis import (TARGETS, asym, corr, gec_reliability,
-                                 offdiag, triu)
+from gectargets.analysis import (TARGETS, asym, corr, edge_vectors,
+                                 gec_reliability, offdiag, triu)
 from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.fitting import START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
-from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING,
+from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING, NMSE,
                                  SEQUENTIAL, dataset_label, figure_title,
                                  heat_panel, model_label, save)
 from gectargets.results import load_fits, load_targets, save_per_model
@@ -190,16 +191,25 @@ def mean_finite(values):
     return v[np.isfinite(v)].mean() if np.isfinite(v).any() else np.nan
 
 
-targets_by_data, sign_rows = {}, []
+targets_by_data = {}
+
+
+def targets_of(t):
+    """(subject -> row, FC, FS) of the task's targets, read once per dataset
+    and variant."""
+    key = (t["dataset"], t["variant"])
+    if key not in targets_by_data:
+        d = load_targets(cfg, *key, keys=("fc", "fs"))
+        targets_by_data[key] = ({s: i for i, s in enumerate(d["subjects"])},
+                                d["fc"], d["fs"])
+    return targets_by_data[key]
+
+
+sign_rows = []
 for t in tasks:
     if t["id"] not in on_grid:
         continue
-    key = (t["dataset"], t["variant"])
-    if key not in targets_by_data:
-        d = load_targets(cfg, *key)
-        targets_by_data[key] = ({s: i for i, s in enumerate(d["subjects"])},
-                                d["fc"], d["fs"])
-    index, fc_emp, fs_emp = targets_by_data[key]
+    index, fc_emp, fs_emp = targets_of(t)
     f = fits[t["id"]]
     values, neg_share = {c: [] for c in SIGN_COLUMNS}, []
     for s, subject in enumerate(f["subjects"]):
@@ -238,6 +248,54 @@ for model, ps in by_model(sign_panels).items():
                          f"mean corr")
             heat_panel(ax, grids[c], title, *CORR, ".2f", best=True)
     finish(fig, model, "1b_negative_fc_edges.png")
+
+
+# %% [markdown]
+# ## 1c. Final fit error across hyperparameters
+# A correlation does not see the scale: a simulated FS_A a hundred times
+# smaller than the data's can still correlate highly with it. Here, the mse
+# of each target at the end of the fit, on the edges of section 1, divided
+# by the subject's mean square of the empirical edges:
+#
+#     nmse = mean((emp - sim)^2) / mean(emp^2)
+#
+# 0 is a perfect fit and 1 no better than predicting zero (above 1: worse).
+# Mean over subjects, on the grid of section 1. Every panel shares one
+# scale, 0 to 1, gray, darker = larger error (values above 1 take the
+# darkest gray; the annotation gives them); the outlined cell is the lowest
+# of the panel.
+
+# %%
+nmse_rows = []
+for t in tasks:
+    if t["id"] not in on_grid:
+        continue
+    index, fc_emp, fs_emp = targets_of(t)
+    f = fits[t["id"]]
+    rows_of = [index[s] for s in f["subjects"]]
+    power = {k: np.mean(v ** 2, axis=-1) for k, v in
+             edge_vectors(fc_emp[rows_of], fs_emp[rows_of]).items()}
+    nmse_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
+                      "model": t["model"],
+                      X_PARAM: t["swept"][X_PARAM],
+                      Y_PARAM: t["swept"][Y_PARAM],
+                      **{f"nmse_{k}": float(np.nanmean(f[f"mse_{v}"]
+                                                       / power[k]))
+                         for k, v in KEYS.items()}})
+nmse_table = pd.DataFrame(nmse_rows)
+save_per_model(nmse_table, out, "1c_final_fit_error.csv")
+
+nmse_panels = [(name, g) for name, g in nmse_table.groupby("panel", sort=False)
+               if len(g) > 1] if len(nmse_table) else []
+for model, ps in by_model(nmse_panels).items():
+    fig, axes = figure(len(ps), len(TARGETS))
+    for row, (name, g) in zip(axes, ps):
+        for ax, key in zip(row, TARGETS):
+            grid = g.pivot(index=Y_PARAM, columns=X_PARAM,
+                           values=f"nmse_{key}")
+            heat_panel(ax, grid, f"{titles[name]}\n{key}: mean mse / "
+                       f"mean square", *NMSE, ".2f", best="min")
+    finish(fig, model, "1c_final_fit_error.png")
 
 
 # %% [markdown]
