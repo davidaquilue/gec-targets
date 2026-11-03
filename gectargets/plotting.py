@@ -15,8 +15,16 @@ GRAY = "#898781"
 
 DIVERGING = LinearSegmentedColormap.from_list(
     "blue_gray_red", ["#104281", "#3987e5", "#f0efec", "#e66767", "#a32525"])
+# The two halves of DIVERGING for signed values of one sign, so that red is
+# always positive and blue negative, darker = larger in magnitude; they start
+# from a light tint, not the gray of 0, which is outside their range
+POSITIVE = LinearSegmentedColormap.from_list(
+    "reds", ["#f8dcdc", "#f0a3a3", "#e66767", "#c44646", "#a32525"])
+NEGATIVE = LinearSegmentedColormap.from_list(
+    "blues_r", ["#104281", "#2563b3", "#3987e5", "#8cb9f0", "#dbe8fa"])
+# Unsigned quantities (counts, power): neutral grays, never read as a sign
 SEQUENTIAL = LinearSegmentedColormap.from_list(
-    "blues", ["#cde2fb", "#86b6ef", "#2a78d6", "#1c5cab", "#0d366b"])
+    "grays", ["#e8e7e2", "#c3c2b7", "#898781", "#52514e", "#262523"])
 
 plt.rcParams.update({
     "figure.dpi": 110, "savefig.dpi": 200, "savefig.bbox": "tight",
@@ -53,16 +61,18 @@ def show_matrix(ax, M, title="", vmax=None, diverging=True, colorbar=True):
 
 
 def corr_norm(values):
-    """Diverging scale centred on 0 when the panel has both signs (FS_A can
-    be fitted with the wrong sign), else sequential over the panel's range,
-    so that a panel of positive values keeps its contrast."""
+    """Scale of a panel of signed values (e.g. correlations). Diverging,
+    centred on 0, when the panel has both signs (FS_A can be fitted with the
+    wrong sign); else over the panel's own range, so that it keeps its
+    contrast, in the half of the diverging map of its sign. Positive is
+    always red and negative blue, darker = larger in magnitude."""
     lo, hi = np.nanmin(values, initial=np.inf), np.nanmax(values, initial=-np.inf)
     if not np.isfinite([lo, hi]).all():
         return Normalize(-1, 1), DIVERGING
     if lo < 0 < hi:
         vmax = max(-lo, hi)
         return Normalize(-vmax, vmax), DIVERGING
-    return Normalize(lo, hi), SEQUENTIAL
+    return Normalize(lo, hi), NEGATIVE if hi <= 0 else POSITIVE
 
 
 def heat_panel(ax, grid, title, norm, cmap, fmt, best=False, outlines=()):
