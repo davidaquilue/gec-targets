@@ -43,7 +43,8 @@ python studies/study2_training_dynamics.py configs/fdt_datasets.json
 python studies/study3_downstream.py        configs/electrophysiology.json
 ```
 
-Figures and tables are written to `<results_root>/studies/study{1,2,3}/`. The
+Figures and tables are written to `<results_root>/studies/study{1,2,3}/`;
+Studies 2 and 3 write one folder per model in theirs (`study2/<model>/`). The
 study scripts are split into `# %%` cells: open them in PyCharm, VS Code or
 Jupyter (jupytext) to run them step by step.
 
@@ -80,7 +81,8 @@ relative to the config file and may contain `$ENV_VARS`.
 <results_root>/<dataset>/<variant>/targets/meta.json, <subject>.npz
 <results_root>/<dataset>/<variant>/fits/<model>/<tag>/<half>/task.json, <subject>.npz
 <results_root>/<dataset>/<variant>/fits/<model>/<tag>/<half>/downstream/<subject>.npz
-<results_root>/studies/study{1,2,3}/...
+<results_root>/studies/study1/...
+<results_root>/studies/study{2,3}/<model>/...
 ```
 
 `variant` is the band plus `_env` / `_orth` (e.g. `alpha_env`, `nofilter`);

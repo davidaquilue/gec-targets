@@ -13,7 +13,8 @@
 #
 # Needs: the targets and the fits of the config's sweep. Run as a script
 # (`python studies/study2_training_dynamics.py CONFIG`) or cell by cell.
-# Outputs in `<results_root>/studies/study2/`.
+# Outputs in `<results_root>/studies/study2/<model>/`, one folder per model
+# (figures and tables of that model only).
 
 # %% Setup
 import sys
@@ -24,13 +25,14 @@ import pandas as pd
 
 from gectargets.analysis import (TARGETS, asym, corr, gec_reliability,
                                  offdiag, triu)
-from gectargets.config import expand_tasks, load_config, study_dir
+from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.fitting import START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
 from gectargets.plotting import (TARGET_COLORS, GRAY, DIVERGING, SEQUENTIAL,
-                                 corr_norm, heat_panel, save)
-from gectargets.results import load_fits, load_targets
+                                 corr_norm, dataset_label, figure_title,
+                                 heat_panel, model_label, save)
+from gectargets.results import load_fits, load_targets, save_per_model
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # section 1: heatmap columns, rows
@@ -58,10 +60,33 @@ def label(t):
     return f"{t['dataset']} | {t['variant']} | {t['model']}"
 
 
+def by_model(panels):
+    """Panels (name, rows with a "model" column) grouped by model,
+    {model: panels}: one figure per model."""
+    groups = {}
+    for name, g in panels:
+        groups.setdefault(g.model.iloc[0], []).append((name, g))
+    return groups
+
+
+def figure(n_rows, n_cols):
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.4 * n_cols,
+                                                      3.0 * n_rows),
+                             squeeze=False)
+    return fig, axes
+
+
+def finish(fig, model, name):
+    """Title the figure with the model, save it in the model's folder."""
+    fig.tight_layout()
+    figure_title(fig, model_label(model))
+    save(fig, model_dir(out, model) / name)
+
+
 rows = []
 for t in tasks:
     f = fits[t["id"]]
-    rows.append({"id": t["id"], "data_model": label(t),
+    rows.append({"id": t["id"], "data_model": label(t), "model": t["model"],
                  **{k: t["fit"][k] for k in ("eps_fc", "eps_fs",
                                               "convergence")},
                  **t["model_params"], "n_subjects": len(f["subjects"]),
@@ -70,7 +95,7 @@ for t in tasks:
                  **{f"r_{k}": float(np.nanmean(f[f"r_{v}"]))
                     for k, v in KEYS.items()}})
 table = pd.DataFrame(rows)
-table.to_csv(out / "1_final_fit_quality.csv", index=False)
+save_per_model(table, out, "1_final_fit_quality.csv")
 with pd.option_context("display.width", 220, "display.precision", 3):
     print(table.to_string(index=False))
 
@@ -81,8 +106,9 @@ with pd.option_context("display.width", 220, "display.precision", 3):
 # dataset, model and any other swept setting (e.g. maxC); only tasks whose
 # sweep entry varies both parameters, and panels with at least two fits. A
 # panel whose correlations have both signs uses a diverging scale centred on
-# 0 (FS_A can be fitted with the wrong sign), any other a sequential scale
-# over its own range; every cell is annotated and the outlined cell is the
+# 0 (FS_A can be fitted with the wrong sign), any other a scale over its own
+# range; positive is always red and negative blue, darker = larger in
+# magnitude. Every cell is annotated and the outlined cell is the
 # best of the panel. Scales differ between panels: compare values, not
 # colours. The last panel is the median number of iterations: cells at the
 # first check (2 x check_every) stopped as soon as they could, usually
@@ -94,34 +120,44 @@ def panel_name(t):
     preprocessing options are already in the variant)."""
     extra = {k: v for k, v in t["swept"].items()
              if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
-    return " | ".join([label(t)] + [f"{k} {v:g}" if isinstance(v, float)
-                                    else f"{k} {v}" for k, v in extra.items()])
+    return " | ".join([label(t)] + settings(extra))
+
+
+def settings(extra):
+    return [f"{k} {v:g}" if isinstance(v, float) else f"{k} {v}"
+            for k, v in extra.items()]
+
+
+def panel_title(t):
+    """Title of a panel in the figures; the model is the figure's title."""
+    extra = {k: v for k, v in t["swept"].items()
+             if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
+    return " | ".join([dataset_label(t["dataset"]), t["variant"]]
+                      + settings(extra))
 
 
 on_grid = {t["id"]: panel_name(t) for t in tasks
            if X_PARAM in t["swept"] and Y_PARAM in t["swept"]
            and t["fit"]["convergence"] != "none"}
+titles = {panel_name(t): panel_title(t) for t in tasks if t["id"] in on_grid}
 grid_table = table[table.id.isin(on_grid)].assign(
     panel=lambda df: df.id.map(on_grid))
 # A panel needs at least two fitted cells (a sweep still running fills in)
 panels = [(name, g) for name, g in grid_table.groupby("panel", sort=False)
           if len(g) > 1]
-if panels:
-    fig, axes = plt.subplots(len(panels), len(TARGETS) + 1,
-                             figsize=(3.4 * (len(TARGETS) + 1),
-                                      3.0 * len(panels)), squeeze=False)
-    for row, (name, g) in zip(axes, panels):
+for model, ps in by_model(panels).items():
+    fig, axes = figure(len(ps), len(TARGETS) + 1)
+    for row, (name, g) in zip(axes, ps):
         for ax, key in zip(row, TARGETS):
             grid = g.pivot(index=Y_PARAM, columns=X_PARAM, values=f"r_{key}")
-            heat_panel(ax, grid, f"{name}\n{key}: mean corr(emp, sim)",
+            heat_panel(ax, grid, f"{titles[name]}\n{key}: mean corr(emp, sim)",
                        *corr_norm(grid.to_numpy(float)), ".2f", best=True)
         grid = g.pivot(index=Y_PARAM, columns=X_PARAM, values="n_iter_median")
-        heat_panel(row[-1], grid, f"{name}\nmedian iterations",
+        heat_panel(row[-1], grid, f"{titles[name]}\nmedian iterations",
                    LogNorm(max(np.nanmin(grid.to_numpy(float)), 1),
                            np.nanmax(grid.to_numpy(float))),
                    SEQUENTIAL, ".0f")
-    fig.tight_layout()
-    save(fig, out / "1_final_fit_quality.png")
+    finish(fig, model, "1_final_fit_quality.png")
 
 
 # %% [markdown]
@@ -179,6 +215,7 @@ for t in tasks:
             select = fc_edges < 0 if op == "<" else fc_edges > 0
             values[column].append(corr_on(emp, sim, select))
     sign_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
+                      "model": t["model"],
                       X_PARAM: t["swept"][X_PARAM],
                       Y_PARAM: t["swept"][Y_PARAM],
                       "neg_fc_share": np.median(neg_share),
@@ -186,15 +223,13 @@ for t in tasks:
                       **{f"n_subjects {c}": int(np.isfinite(v).sum())
                          for c, v in values.items()}})
 sign_table = pd.DataFrame(sign_rows)
-sign_table.to_csv(out / "1b_negative_fc_edges.csv", index=False)
+save_per_model(sign_table, out, "1b_negative_fc_edges.csv")
 
 sign_panels = [(name, g) for name, g in sign_table.groupby("panel", sort=False)
                if len(g) > 1] if len(sign_table) else []
-if sign_panels:
-    fig, axes = plt.subplots(len(sign_panels), len(SIGN_COLUMNS),
-                             figsize=(3.4 * len(SIGN_COLUMNS),
-                                      3.0 * len(sign_panels)), squeeze=False)
-    for row, (name, g) in zip(axes, sign_panels):
+for model, ps in by_model(sign_panels).items():
+    fig, axes = figure(len(ps), len(SIGN_COLUMNS))
+    for row, (name, g) in zip(axes, ps):
         grids = {c: g.pivot(index=Y_PARAM, columns=X_PARAM, values=c)
                  for c in SIGN_COLUMNS}
         for target in ("FS", "FS_A"):
@@ -203,13 +238,13 @@ if sign_panels:
                 [grids[c].to_numpy(float).ravel() for c in pair]))
             for c in pair:
                 ax = row[list(SIGN_COLUMNS).index(c)]
-                title = f"{name}\n{c}: mean corr(emp, sim)"
+                title = f"{titles[name]}\n{c}: mean corr(emp, sim)"
                 if c == next(iter(SIGN_COLUMNS)):
-                    title = (f"{name}\n{c} ({g.neg_fc_share.median():.0%} "
-                             f"of edges): mean corr")
+                    title = (f"{titles[name]}\n{c} "
+                             f"({g.neg_fc_share.median():.0%} of edges): "
+                             f"mean corr")
                 heat_panel(ax, grids[c], title, norm, cmap, ".2f", best=True)
-    fig.tight_layout()
-    save(fig, out / "1b_negative_fc_edges.png")
+    finish(fig, model, "1b_negative_fc_edges.png")
 
 
 # %% [markdown]
@@ -251,25 +286,28 @@ def stop_iterations(t, f):
 selected = TRAJECTORY_TASKS or [t["id"] for t in tasks
                                 if t["fit"]["convergence"] == "none"] \
     or [t["id"] for t in tasks[:4]]
-sel_tasks = [t for t in tasks if t["id"] in selected]
-fig, axes = plt.subplots(len(sel_tasks), 4, figsize=(13, 2.6 * len(sel_tasks)),
-                         squeeze=False)
-for row, t in zip(axes, sel_tasks):
-    f = fits[t["id"]]
-    iters = history_matrix(f, "iter").max(axis=0)
-    stops = stop_iterations(t, f)
-    for ax, key in zip(row, TARGETS):
-        H = history_matrix(f, f"r_{KEYS[key]}")
-        ax.fill_between(iters, *np.nanpercentile(H, [25, 75], axis=0),
-                        color=TARGET_COLORS[key], alpha=0.2, linewidth=0)
-        ax.plot(iters, np.nanmean(H, axis=0), color=TARGET_COLORS[key])
-        if np.isfinite(stops).any():
-            ax.axvline(np.nanmedian(stops), color=GRAY, linestyle="--",
-                       linewidth=1)
-        ax.set(title=f"task {t['id']}: {t['model']} {t['swept']}\n{key}",
-               xlabel="iteration", ylabel="corr(emp, sim)")
-fig.tight_layout()
-save(fig, out / "2_trajectories.png")
+sel_tasks = {}
+for t in tasks:
+    if t["id"] in selected:
+        sel_tasks.setdefault(t["model"], []).append(t)
+for model, group in sel_tasks.items():
+    fig, axes = figure(len(group), len(TARGETS))
+    for row, t in zip(axes, group):
+        f = fits[t["id"]]
+        iters = history_matrix(f, "iter").max(axis=0)
+        stops = stop_iterations(t, f)
+        for ax, key in zip(row, TARGETS):
+            H = history_matrix(f, f"r_{KEYS[key]}")
+            ax.fill_between(iters, *np.nanpercentile(H, [25, 75], axis=0),
+                            color=TARGET_COLORS[key], alpha=0.2, linewidth=0)
+            ax.plot(iters, np.nanmean(H, axis=0), color=TARGET_COLORS[key])
+            if np.isfinite(stops).any():
+                ax.axvline(np.nanmedian(stops), color=GRAY, linestyle="--",
+                           linewidth=1)
+            ax.set(title=f"{dataset_label(t['dataset'])} | task {t['id']}\n"
+                         f"{key}: {', '.join(settings(t['swept']))}",
+                   xlabel="iteration", ylabel="corr(emp, sim)")
+    finish(fig, model, "2_trajectories.png")
 
 # %% [markdown]
 # ## 3. When the fit stops, have FC, FS, FS_S and FS_A stopped improving?
@@ -331,8 +369,8 @@ for t in tasks:
     f = fits[t["id"]]
     window, tol = t["fit"]["check_every"], t["fit"]["tol"]
     stops = [stop_point(t, f, s) for s in range(len(f["subjects"]))]
-    row = {"id": t["id"], "data_model": label(t), **t["swept"],
-           "convergence": t["fit"]["convergence"],
+    row = {"id": t["id"], "data_model": label(t), "model": t["model"],
+           **t["swept"], "convergence": t["fit"]["convergence"],
            "stop_iter_median": np.median(stops)}
     for part, key in PARTS.items():
         ratios = [improvement_at(np.asarray(f["history_iter"][s], float),
@@ -343,7 +381,7 @@ for t in tasks:
             summary(ratios)
     stop_rows.append(row)
 stop_table = pd.DataFrame(stop_rows)
-stop_table.to_csv(out / "3_improvement_at_stop.csv", index=False)
+save_per_model(stop_table, out, "3_improvement_at_stop.csv")
 with pd.option_context("display.width", 220, "display.precision", 3):
     print(stop_table.to_string(index=False))
 
@@ -360,21 +398,18 @@ grid_stop = stop_table[stop_table.id.isin(on_grid)].assign(
     panel=lambda df: df.id.map(on_grid))
 stop_panels = [(name, g) for name, g in grid_stop.groupby("panel", sort=False)
                if len(g) > 1]
-if stop_panels:
-    fig, axes = plt.subplots(len(stop_panels), len(PARTS),
-                             figsize=(3.4 * len(PARTS), 3.0 * len(stop_panels)),
-                             squeeze=False)
-    for row, (name, g) in zip(axes, stop_panels):
+for model, ps in by_model(stop_panels).items():
+    fig, axes = figure(len(ps), len(PARTS))
+    for row, (name, g) in zip(axes, ps):
         grids = {p: g.pivot(index=Y_PARAM, columns=X_PARAM,
                             values=f"ratio_{p}") for p in PARTS}
         vmax = max([10] + [np.nanmax(np.abs(x.to_numpy(float)), initial=0)
                            for x in grids.values()])
         norm = SymLogNorm(linthresh=1, vmin=-vmax, vmax=vmax)
         for ax, (part, grid) in zip(row, grids.items()):
-            heat_panel(ax, grid, f"{name}\n{part}: improvement at stop / tol",
-                       norm, DIVERGING, compact)
-    fig.tight_layout()
-    save(fig, out / "3_improvement_at_stop.png")
+            heat_panel(ax, grid, f"{titles[name]}\n{part}: improvement at "
+                       f"stop / tol", norm, DIVERGING, compact)
+    finish(fig, model, "3_improvement_at_stop.png")
 
 # %% [markdown]
 # ## 4. GEC reliability
@@ -392,9 +427,10 @@ for t in tasks:
         fits[t["id"]], None if sc_path is None else load_matrix(sc_path),
         load_fits(cfg, {**t , "half": "odd"}),
         load_fits(cfg, {**t, "half": "even"}))
-    rel_rows.append({"id": t["id"], "data_model": label(t), **t["swept"],
+    rel_rows.append({"id": t["id"], "data_model": label(t),
+                     "model": t["model"], **t["swept"],
                      "convergence": t["fit"]["convergence"], **rel})
 reliability = pd.DataFrame(rel_rows)
-reliability.to_csv(out / "4_gec_reliability.csv", index=False)
+save_per_model(reliability, out, "4_gec_reliability.csv")
 with pd.option_context("display.width", 220, "display.precision", 3):
     print(reliability.to_string(index=False))

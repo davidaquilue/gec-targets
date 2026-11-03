@@ -23,7 +23,8 @@
 # (`python -m gectargets downstream CONFIG --all`, or
 # hpc/downstream_array.sbatch); nothing is refitted. Run as a script
 # (`python studies/study3_downstream.py CONFIG`) or cell by cell. Outputs in
-# `<results_root>/studies/study3/`.
+# `<results_root>/studies/study3/<model>/`, one folder per model (figures
+# and tables of that model only).
 
 # %% Setup
 import sys
@@ -37,11 +38,12 @@ from scipy.stats import (false_discovery_control, rankdata, spearmanr,
                          ttest_rel, wilcoxon)
 
 from gectargets.analysis import asym, triu
-from gectargets.config import expand_tasks, load_config, study_dir
+from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.downstream import load_downstream, panel_key, selected_cells
-from gectargets.plotting import (DIVERGING, GRAY, corr_norm, heat_panel,
+from gectargets.plotting import (DIVERGING, GRAY, corr_norm, dataset_label,
+                                 figure_title, heat_panel, model_label,
                                  outline_legend, save)
-from gectargets.results import load_fits, load_targets
+from gectargets.results import load_fits, load_targets, save_per_model
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/electrophysiology.json"
 X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # heatmap columns, rows
@@ -73,11 +75,33 @@ for t in expand_tasks(cfg):
 print(f"{len(tasks)} grid tasks with downstream measures")
 
 
+def settings(extra):
+    return [f"{k} {v:g}" if isinstance(v, float) else f"{k} {v}"
+            for k, v in extra]
+
+
 def panel_name(key):
+    """Name of a panel in the tables."""
     dataset, variant, model, extra = key
-    return " | ".join([dataset, variant, model]
-                      + [f"{k} {v:g}" if isinstance(v, float) else f"{k} {v}"
-                         for k, v in extra])
+    return " | ".join([dataset, variant, model] + settings(extra))
+
+
+def panel_title(key):
+    """Title of a panel in the figures; the model is the figure's title."""
+    dataset, variant, model, extra = key
+    return " | ".join([dataset_label(dataset), variant] + settings(extra))
+
+
+def write(table, name):
+    save_per_model(table, out, name)
+
+
+def by_model(keys):
+    """Panel keys grouped by model, {model: [keys]}: one figure per model."""
+    groups = {}
+    for key in keys:
+        groups.setdefault(key[2], []).append(key)
+    return groups
 
 
 # One row per task and subject; node FDT per task (subjects x nodes)
@@ -94,7 +118,7 @@ for t in tasks:
         .reindex(d["subjects"]).to_numpy(float)}))
     node_fdt[t["id"]] = pd.DataFrame(d["fdt"], index=d["subjects"])
 data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-data.to_csv(out / "downstream_per_subject.csv", index=False)
+write(data, "downstream_per_subject.csv")
 n_unstable = int((~data.stable).sum()) if len(data) else 0
 if n_unstable:
     print(f"{n_unstable} unstable fits left out (no downstream measures)")
@@ -103,7 +127,7 @@ by_panel = {}
 for t in tasks:
     by_panel.setdefault(panel_key(t), []).append(t)
 cells = selected_cells(cfg, tasks, fits, X_PARAM, Y_PARAM)
-sel_rows = [{"panel": panel_name(key), "cell": name,
+sel_rows = [{"panel": panel_name(key), "model": key[2], "cell": name,
              "id": None if t is None else t["id"],
              X_PARAM: None if t is None else t["swept"][X_PARAM],
              Y_PARAM: None if t is None else t["swept"][Y_PARAM],
@@ -111,7 +135,7 @@ sel_rows = [{"panel": panel_name(key), "cell": name,
              else float(np.nanmean(fits[t["id"]]["r_fs_a"]))}
             for key, chosen in cells.items() for name, t in chosen.items()]
 selected = pd.DataFrame(sel_rows)
-selected.to_csv(out / "selected_cells.csv", index=False)
+write(selected, "selected_cells.csv")
 with pd.option_context("display.width", 200, "display.precision", 3):
     print(selected.to_string(index=False))
 
@@ -149,19 +173,35 @@ def mean_row_corr(X, Y):
 
 
 def figure(n_rows, n_cols):
+    n_cols = max(n_cols, 1)   # no columns: no stable fits, an empty figure
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.4 * n_cols,
                                                       3.0 * n_rows),
                              squeeze=False)
     return fig, axes
 
 
-def finish(fig, axes, path):
+def model_measures(model):
+    """Measures with values for the model (no EPR for linear_hopf): the
+    columns of its figures."""
+    return measures_of(data[(data.model == model) & data.stable])
+
+
+def model_cells(keys):
+    """The outlined cells on at least one of the panels."""
+    return [name for name in CELLS
+            if any(cells.get(k, {}).get(name) is not None for k in keys)]
+
+
+def finish(fig, axes, model, keys, name):
+    """Hide the empty panels, title the figure with the model and save it in
+    the model's folder."""
     for ax in axes.flat:
         if not ax.has_data():
             ax.set_visible(False)
     fig.tight_layout()
-    outline_legend(fig, CELLS.values())
-    save(fig, path)
+    legend = outline_legend(fig, [CELLS[c] for c in model_cells(keys)])
+    figure_title(fig, model_label(model), above=legend)
+    save(fig, model_dir(out, model) / name)
 
 
 # %% [markdown]
@@ -178,38 +218,42 @@ for key in by_panel:
     for m in measures_of(d):
         stats = d.groupby([Y_PARAM, X_PARAM])[m].agg(
             median="median", sd="std", n="count").reset_index()
-        level_rows += [{"panel": panel_name(key), "measure": m, **r}
-                       for r in stats.to_dict("records")]
+        level_rows += [{"panel": panel_name(key), "model": key[2],
+                        "measure": m, **r} for r in stats.to_dict("records")]
         at = {name: d[d.id == t["id"]][m].median()
               for name, t in cells[key].items() if t is not None}
         spread_rows.append({
-            "panel": panel_name(key), "measure": m, "n_cells": len(stats),
+            "panel": panel_name(key), "model": key[2], "measure": m,
+            "n_cells": len(stats),
             "median_min": stats["median"].min(),
             "median_max": stats["median"].max(),
             "spread_ratio": stats["median"].std() / stats["sd"].median(),
             **{f"median_{name}": v for name, v in at.items()}})
 level = pd.DataFrame(level_rows)
-level.to_csv(out / "1_level_per_cell.csv", index=False)
+write(level, "1_level_per_cell.csv")
 spread = pd.DataFrame(spread_rows)
-spread.to_csv(out / "1_spread.csv", index=False)
+write(spread, "1_spread.csv")
 with pd.option_context("display.width", 200, "display.precision", 3):
     print(spread.to_string(index=False))
 
 if len(level):
-    fig, axes = figure(len(by_panel), len(MEASURES))
-    for row, key in zip(axes, by_panel):
-        for ax, m in zip(row, MEASURES):
-            lv = level[(level.panel == panel_name(key)) & (level.measure == m)]
-            if not len(lv):
-                continue
-            ratio = spread[(spread.panel == panel_name(key))
-                           & (spread.measure == m)].spread_ratio.iloc[0]
-            grid = grid_of(lv, "median")
-            heat_panel(ax, grid, f"{panel_name(key)}\n{MEASURES[m]}: median "
-                       f"(spread ratio {ratio:.2g})",
-                       *corr_norm(grid.to_numpy(float)), ".2g",
-                       outlines=outlines(key))
-    finish(fig, axes, out / "1_level.png")
+    for model, keys in by_model(by_panel).items():
+        ms = model_measures(model)
+        fig, axes = figure(len(keys), len(ms))
+        for row, key in zip(axes, keys):
+            for ax, m in zip(row, ms):
+                lv = level[(level.panel == panel_name(key))
+                           & (level.measure == m)]
+                if not len(lv):
+                    continue
+                ratio = spread[(spread.panel == panel_name(key))
+                               & (spread.measure == m)].spread_ratio.iloc[0]
+                grid = grid_of(lv, "median")
+                heat_panel(ax, grid, f"{panel_title(key)}\n{MEASURES[m]}: "
+                           f"median (spread ratio {ratio:.2g})",
+                           *corr_norm(grid.to_numpy(float)), ".2g",
+                           outlines=outlines(key))
+        finish(fig, axes, model, keys, "1_level.png")
 
 
 # %% [markdown]
@@ -239,7 +283,8 @@ for key, group in by_panel.items():
         if rt is None:
             continue
         for t in group:
-            row = {"panel": panel_name(key), "reference": ref, "id": t["id"],
+            row = {"panel": panel_name(key), "model": key[2],
+                   "reference": ref, "id": t["id"],
                    X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM]}
             for m, w in wide.items():
                 row[m] = (spearman(w[rt["id"]], w[t["id"]])
@@ -247,38 +292,43 @@ for key, group in by_panel.items():
             row["fdt_nodes"] = node_pattern(rt["id"], t["id"])
             order_rows.append(row)
 order = pd.DataFrame(order_rows)
-order.to_csv(out / "2_subject_order.csv", index=False)
+write(order, "2_subject_order.csv")
 
 if len(order):
-    cols = [(ref, o) for ref in CELLS for o in ORDER]
-    fig, axes = figure(len(by_panel), len(cols))
-    for row, key in zip(axes, by_panel):
-        for ax, (ref, o) in zip(row, cols):
-            g = order[(order.panel == panel_name(key)) & (order.reference == ref)]
-            if not len(g) or o not in g or g[o].isna().all():
-                continue
-            heat_panel(ax, grid_of(g, o), f"{panel_name(key)}\n{ORDER[o]} "
-                       f"vs {CELLS[ref]['label']}", *CORR, ".2f",
-                       outlines=outlines(key))
-    finish(fig, axes, out / "2_subject_order.png")
+    for model, keys in by_model(by_panel).items():
+        cols = [(ref, o) for ref in model_cells(keys) for o in ORDER
+                if o == "fdt_nodes" or o in model_measures(model)]
+        fig, axes = figure(len(keys), len(cols))
+        for row, key in zip(axes, keys):
+            for ax, (ref, o) in zip(row, cols):
+                g = order[(order.panel == panel_name(key))
+                          & (order.reference == ref)]
+                if not len(g) or o not in g or g[o].isna().all():
+                    continue
+                heat_panel(ax, grid_of(g, o), f"{panel_title(key)}\n"
+                           f"{ORDER[o]} vs {CELLS[ref]['label']}", *CORR,
+                           ".2f", outlines=outlines(key))
+        finish(fig, axes, model, keys, "2_subject_order.png")
 
 # Every cell against every cell: Spearman over subjects, cells ordered by
 # eps_fc then eps_fs; the outlined diagonal entries are the two cells.
 matrix_rows = []
-if len(data):
-    fig, axes = figure(len(by_panel), len(MEASURES))
-    for row, (key, group) in zip(axes, by_panel.items()):
+for model, keys in by_model(by_panel).items():
+    ms = model_measures(model)
+    fig, axes = figure(len(keys), len(ms))
+    for row, key in zip(axes, keys):
         d = data[(data.panel == panel_name(key)) & data.stable]
-        group = sorted(group, key=lambda t: (t["swept"][Y_PARAM],
-                                             t["swept"][X_PARAM]))
+        group = sorted(by_panel[key], key=lambda t: (t["swept"][Y_PARAM],
+                                                     t["swept"][X_PARAM]))
         ids = [t["id"] for t in group]
-        for ax, m in zip(row, MEASURES):
+        for ax, m in zip(row, ms):
             if m not in measures_of(d):
                 continue
             R = d.pivot(index="subject", columns="id", values=m)[ids].corr(
                 method="spearman")
-            matrix_rows += [{"panel": panel_name(key), "measure": m,
-                             "id_a": a, "id_b": b, "spearman": R.loc[a, b]}
+            matrix_rows += [{"panel": panel_name(key), "model": model,
+                             "measure": m, "id_a": a, "id_b": b,
+                             "spearman": R.loc[a, b]}
                             for a in ids for b in ids]
             im = ax.imshow(R.to_numpy(), cmap=DIVERGING, vmin=-1, vmax=1,
                            interpolation="nearest")
@@ -293,11 +343,11 @@ if len(data):
                                            fill=False, linewidth=1.5,
                                            **{a: CELLS[name][a] for a in
                                               ("color", "linestyle")}))
-            ax.set(title=f"{panel_name(key)}\n{MEASURES[m]}: Spearman "
+            ax.set(title=f"{panel_title(key)}\n{MEASURES[m]}: Spearman "
                          f"between cells", xlabel=f"{Y_PARAM} / {X_PARAM}")
             fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03)
-    finish(fig, axes, out / "2_cell_by_cell.png")
-pd.DataFrame(matrix_rows).to_csv(out / "2_cell_by_cell.csv", index=False)
+    finish(fig, axes, model, keys, "2_cell_by_cell.png")
+write(pd.DataFrame(matrix_rows), "2_cell_by_cell.csv")
 
 
 # %% [markdown]
@@ -318,48 +368,53 @@ for dataset, variant in dict.fromkeys((t["dataset"], t["variant"])
     targets = load_targets(cfg, dataset, variant, keys=("fs",))
     fs_a = asym(targets["fs"])
     empirical[dataset, variant] = (
-        pd.Series(np.mean(triu(fs_a) ** 2, axis=-1),
-                  index=targets["subjects"]),
-        pd.DataFrame((fs_a ** 2).sum(axis=-1), index=targets["subjects"]))
+        # Mean total FS squared -> below named power
+        pd.Series(np.mean(triu(fs_a) ** 2, axis=-1), index=targets["subjects"]),
+        # Regional FS squared (sum over one axis in the matrix) -> below named nodes
+        pd.DataFrame((fs_a ** 2).sum(axis=-1), index=targets["subjects"])
+    )
 
 follow_rows = []
-for key, group in by_panel.items():
-    d = data[(data.panel == panel_name(key)) & data.stable]
+for key, group in by_panel.items():  # key = data type; group = list of hyperparam comb
+    d = data[(data.panel == panel_name(key)) & data.stable] # data for panel
     power, nodes = empirical[key[0], key[1]]
     for t in group:
-        dt = d[d.id == t["id"]].set_index("subject")
-        row = {"panel": panel_name(key), "id": t["id"],
+        dt = d[d.id == t["id"]].set_index("subject")  # data of task
+        row = {"panel": panel_name(key), "model": key[2], "id": t["id"],
                X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
                "r_fs_a_mean": dt.r_fs_a.mean()}
         for m in measures_of(d):
             row[f"{m}_median"] = dt[m].median()
-            row[f"{m}_vs_fit"] = spearman(dt[m], dt.r_fs_a)
+            row[f"{m}_vs_fit"] = spearman(dt[m], dt.r_fs_a)  # corr metric with fit fs_A
             row[f"{m}_vs_data"] = spearman(dt[m], power.loc[dt.index])
-        sim = node_fdt[t["id"]].loc[dt.index]
-        row["fdt_nodes_vs_data"] = mean_row_corr(
-            sim.to_numpy(), nodes.loc[dt.index].to_numpy())
+        sim = node_fdt[t["id"]].loc[dt.index]  # Set task index of FDT
+        row["fdt_nodes_vs_data"] = mean_row_corr(  # Corr fdt with fs_A**2 per nodes
+            sim.to_numpy(), nodes.loc[dt.index].to_numpy()
+        )
         follow_rows.append(row)
 follow = pd.DataFrame(follow_rows)
-follow.to_csv(out / "3_fit_vs_data.csv", index=False)
+write(follow, "3_fit_vs_data.csv")
 
 FOLLOW = {"fdt_vs_fit": "mean FDT vs fit", "fdt_vs_data": "mean FDT vs data",
           "fdt_nodes_vs_data": "FDT node pattern vs data",
           "epr_vs_fit": "EPR vs fit", "epr_vs_data": "EPR vs data"}
-if len(follow):
-    fig, axes = figure(len(by_panel), len(FOLLOW))
-    for row, key in zip(axes, by_panel):
+for model, keys in by_model(by_panel).items():
+    ms = model_measures(model)
+    cols = [c for c in FOLLOW if c.split("_")[0] in ms]
+    fig, axes = figure(len(keys), len(cols))
+    for row, key in zip(axes, keys):
         g = follow[follow.panel == panel_name(key)]
-        for ax, (col, title) in zip(row, FOLLOW.items()):
+        for ax, col in zip(row, cols):
             if col not in g or g[col].isna().all():
                 continue
-            heat_panel(ax, grid_of(g, col), f"{panel_name(key)}\n{title}",
-                       *CORR, ".2f", outlines=outlines(key))
-    finish(fig, axes, out / "3_fit_vs_data.png")
+            heat_panel(ax, grid_of(g, col), f"{panel_title(key)}\n"
+                       f"{FOLLOW[col]}", *CORR, ".2f", outlines=outlines(key))
+    finish(fig, axes, model, keys, "3_fit_vs_data.png")
 
-    fig, axes = figure(len(by_panel), len(MEASURES))
-    for row, key in zip(axes, by_panel):
+    fig, axes = figure(len(keys), len(ms))
+    for row, key in zip(axes, keys):
         g = follow[follow.panel == panel_name(key)]
-        for ax, m in zip(row, MEASURES):
+        for ax, m in zip(row, ms):
             if f"{m}_median" not in g or g[f"{m}_median"].isna().all():
                 continue
             ax.scatter(g.r_fs_a_mean, g[f"{m}_median"], s=14, color=GRAY)
@@ -371,10 +426,11 @@ if len(follow):
                                edgecolor=CELLS[name]["color"],
                                linestyle=CELLS[name]["linestyle"])
             rho = spearman(g.r_fs_a_mean, g[f"{m}_median"])
-            ax.set(title=f"{panel_name(key)}\nover cells: Spearman "
-                         f"{rho:.2f}", xlabel="mean corr(emp, sim) FS_A",
+            ax.set(title=f"{panel_title(key)}\n{MEASURES[m]}, over cells: "
+                         f"Spearman {rho:.2f}",
+                   xlabel="mean corr(emp, sim) FS_A",
                    ylabel=f"median {MEASURES[m]}")
-    finish(fig, axes, out / "3_fit_vs_measure_over_cells.png")
+    finish(fig, axes, model, keys, "3_fit_vs_measure_over_cells.png")
 
 
 # %% [markdown]
@@ -397,36 +453,47 @@ def rank_biserial(diff):
     return (plus - minus) / (plus + minus) if len(diff) else np.nan
 
 
+# Here, variable naming is quite confusing: task_ds -> Task fMRI dataset name
+# However, each hyperparameter combination evaluated (for instance, each eps_fc,
+# eps_fs pair) is also called "task".
 task_ds, rest_ds = CONTRAST
 pairs = {}
-for t in tasks:
-    if t["dataset"] != rest_ds:
+for t in tasks:  # Iterate over all tasks
+    if t["dataset"] != rest_ds:  # For each task that worked on rest
         continue
+    # Find the corresponding task (same hyperparm comb) of the task-data
     u = next((u for u in tasks if u["dataset"] == task_ds
               and (u["variant"], u["model"], u["tag"])
               == (t["variant"], t["model"], t["tag"])), None)
-    if u is not None:
+    if u is not None:  # If there is a match, add the pair
         pairs.setdefault(panel_key(t), []).append((u, t))
 
 def contrast_name(key):
     return f"{task_ds} vs {rest_ds} | " + panel_name(key).split(" | ", 1)[1]
 
 
+def contrast_title(key):
+    return " | ".join([f"{dataset_label(task_ds)} vs {dataset_label(rest_ds)}",
+                       key[1]] + settings(key[3]))
+
+
 contrast_rows = []
 for key, group in pairs.items():
     name = contrast_name(key)
     for u, t in group:
+        # Get data of the "task" (hyperparam. comb.) for task (a) and rest (b)
         a = data[(data.id == u["id"]) & data.stable].set_index("subject")
         b = data[(data.id == t["id"]) & data.stable].set_index("subject")
-        common = a.index.intersection(b.index)
-        row = {"panel": name, "id_task": u["id"], "id_rest": t["id"],
+        common = a.index.intersection(b.index)  # To ensure same sub ordering in both
+        row = {"panel": name, "model": key[2], "id_task": u["id"],
+               "id_rest": t["id"],
                X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
                "n_subjects": len(common),
                "r_fs_a_mean": (a.r_fs_a.mean() + b.r_fs_a.mean()) / 2}
         for m in measures_of(data[data.id.isin([u["id"], t["id"]])]):
             x, y = a.loc[common, m].to_numpy(), b.loc[common, m].to_numpy()
             diff = x - y
-            if len(diff) < 3:
+            if len(diff) < 3:  # Cases with very few data
                 continue
             row.update({f"{m}_task_mean": x.mean(), f"{m}_rest_mean": y.mean(),
                         f"{m}_d_z": diff.mean() / diff.std(ddof=1),
@@ -445,7 +512,7 @@ for m in MEASURES:
             contrast.loc[g.index[ok], f"{m}_q_t"] = false_discovery_control(
                 g.loc[ok, f"{m}_p_t"])
 if len(contrast):
-    contrast.to_csv(out / "4_contrast_task_vs_rest.csv", index=False)
+    write(contrast, "4_contrast_task_vs_rest.csv")
     with pd.option_context("display.width", 220, "display.precision", 3):
         print(contrast.to_string(index=False))
 else:
@@ -467,23 +534,25 @@ def contrast_outlines(key, g):
 
 
 if len(contrast):
-    fig, axes = figure(len(pairs), len(MEASURES))
-    for row, key in zip(axes, pairs):
-        g = contrast[contrast.panel == contrast_name(key)]
-        marks = contrast_outlines(key, g)
-        for ax, m in zip(row, MEASURES):
-            if f"{m}_d_z" not in g or g[f"{m}_d_z"].isna().all():
-                continue
-            grid = grid_of(g, f"{m}_d_z")
-            vmax = np.nanmax(np.abs(grid.to_numpy(float)))
-            heat_panel(ax, grid, f"{g.panel.iloc[0]}\n{MEASURES[m]}: d_z "
-                       f"(task - rest)", Normalize(-vmax, vmax), DIVERGING,
-                       ".2f", outlines=marks)
-            q = grid_of(g, f"{m}_q_t").to_numpy(float)
-            for i, j in zip(*np.nonzero(q < ALPHA)):
-                ax.text(j + 0.88, i + 0.8, "*", ha="center", va="center",
-                        fontsize=9, color="#0b0b0b")
-    finish(fig, axes, out / "4_contrast_task_vs_rest.png")
+    for model, keys in by_model(pairs).items():
+        ms = model_measures(model)
+        fig, axes = figure(len(keys), len(ms))
+        for row, key in zip(axes, keys):
+            g = contrast[contrast.panel == contrast_name(key)]
+            marks = contrast_outlines(key, g)
+            for ax, m in zip(row, ms):
+                if f"{m}_d_z" not in g or g[f"{m}_d_z"].isna().all():
+                    continue
+                grid = grid_of(g, f"{m}_d_z")
+                vmax = np.nanmax(np.abs(grid.to_numpy(float)))
+                heat_panel(ax, grid, f"{contrast_title(key)}\n{MEASURES[m]}: "
+                           f"d_z (task - rest)", Normalize(-vmax, vmax),
+                           DIVERGING, ".2f", outlines=marks)
+                q = grid_of(g, f"{m}_q_t").to_numpy(float)
+                for i, j in zip(*np.nonzero(q < ALPHA)):
+                    ax.text(j + 0.88, i + 0.8, "*", ha="center", va="center",
+                            fontsize=9, color="#0b0b0b")
+        finish(fig, axes, model, keys, "4_contrast_task_vs_rest.png")
 
     # Per subject, rest -> task, at the two outlined cells
     for key in pairs:
@@ -504,9 +573,10 @@ if len(contrast):
                 ax.plot([0, 1], both.T, color=GRAY, linewidth=0.6, alpha=0.5)
                 ax.plot([0, 1], both.mean(axis=0), color=mark["color"],
                         linestyle=mark["linestyle"], linewidth=2.5)
-                ax.set(xticks=[0, 1], xticklabels=[rest_ds, task_ds],
+                ax.set(xticks=[0, 1], xticklabels=[dataset_label(rest_ds),
+                                                   dataset_label(task_ds)],
                        ylabel=MEASURES[m], title=f"{mark['label']}: "
                        f"d_z {c[f'{m}_d_z']:.2f}, q {c[f'{m}_q_t']:.2g}")
-        fig.suptitle(contrast_name(key))
         fig.tight_layout()
-        save(fig, out / f"4_paired_{key[1]}_{key[2]}.png")
+        figure_title(fig, f"{model_label(key[2])}\n{contrast_title(key)}")
+        save(fig, model_dir(out, key[2]) / f"4_paired_{key[1]}.png")
