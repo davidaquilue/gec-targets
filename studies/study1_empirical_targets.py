@@ -28,7 +28,8 @@ from gectargets.analysis import (TARGETS, SNR_METRICS, edge_vectors,
                                  epoch_signflip)
 from gectargets.config import load_config, study_dir, target_variants, \
     variant_name
-from gectargets.plotting import TARGET_COLORS, GRAY, show_matrix, save
+from gectargets.plotting import (TARGET_COLORS, GRAY, dataset_label,
+                                 figure_title, show_matrix, save)
 from gectargets.results import load_targets, load_tau_scan
 from gectargets.targets import compute_tau_scan
 
@@ -40,6 +41,7 @@ N_PERM = 1000        # sign flips for the FS_A null
 TAU_RANGE, N_TAUS = 3, 15
 # any of analysis.SNR_METRICS (listed when section 8 runs)
 TAU_METRICS = ["snr", "snr_epochs", "epoch_signflip", "between_r", "i_diff"]
+N_EXAMPLES, SEED = 4, 0   # section 1b: subjects drawn per dataset, their seed
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study1")
@@ -73,6 +75,30 @@ for row, (name, d) in zip(axes, data.items()):
                     None if key == "FS_A" else vmax)
 fig.tight_layout()
 save(fig, out / "1_group_mean_matrices.png")
+
+# %% [markdown]
+# ## 1b. Individual subjects
+# The four targets of N_EXAMPLES subjects drawn at random from each dataset
+# (fixed SEED: the same subjects on every run), one figure per dataset, one
+# row per subject. Scales as in section 1, per row: FC and FS share one,
+# FS_A has its own.
+
+# %%
+rng = np.random.default_rng(SEED)
+for name, d in data.items():
+    n = len(d["subjects"])
+    picks = np.sort(rng.choice(n, min(N_EXAMPLES, n), replace=False))
+    fig, axes = plt.subplots(len(picks), 4, figsize=(13, 3.2 * len(picks)),
+                             squeeze=False)
+    for row, i in zip(axes, picks):
+        mats = target_matrices(d["fc"][i], d["fs"][i])
+        vmax = max(np.nanmax(np.abs(offdiag(mats[k]))) for k in ("FC", "FS"))
+        for ax, key in zip(row, TARGETS):
+            show_matrix(ax, mats[key], f"{d['subjects'][i]} ({d['groups'][i]})"
+                        f"\n{key}", None if key == "FS_A" else vmax)
+    fig.tight_layout()
+    figure_title(fig, f"{dataset_label(d['dataset'])} | {d['variant']}")
+    save(fig, out / f"1b_subjects_{d['dataset']}_{d['variant']}.png")
 
 # %% [markdown]
 # ## 2. How big is the antisymmetric part?
