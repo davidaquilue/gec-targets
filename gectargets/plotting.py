@@ -13,6 +13,13 @@ COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
 TARGET_COLORS = dict(zip(("FC", "FS", "FS_S", "FS_A"), COLORS))
 GRAY = "#898781"
 
+# Names shown in figure titles; a name not listed is shown as it is
+MODEL_LABELS = {"legacy": "Legacy model", "network": "Network model",
+                "linear_hopf": "Linear Hopf model"}
+DATASET_LABELS = {"UCM_AAL": "UCM MEG (AAL)", "UniRoma": "UniRoma EEG",
+                  "ADNI_Schaefer400": "ADNI fMRI (Schaefer 400)",
+                  "HCP_RESTLR": "HCP rest", "HCP_WMLR": "HCP working memory"}
+
 DIVERGING = LinearSegmentedColormap.from_list(
     "blue_gray_red", ["#104281", "#3987e5", "#f0efec", "#e66767", "#a32525"])
 # The two halves of DIVERGING for signed values of one sign, so that red is
@@ -34,6 +41,14 @@ plt.rcParams.update({
     "ytick.color": "#52514e", "axes.grid": False, "grid.color": "#e1e0d9",
     "legend.frameon": False, "lines.linewidth": 2,
 })
+
+
+def model_label(name):
+    return MODEL_LABELS.get(name, name)
+
+
+def dataset_label(name):
+    return DATASET_LABELS.get(name, name)
 
 
 def color_for(items):
@@ -136,11 +151,21 @@ def heat_panel(ax, grid, title, norm, cmap, fmt, best=False, outlines=()):
 
 def outline_legend(fig, styles):
     """Legend of the outlines above the figure; styles: dicts with "color",
-    "linestyle", "label". Call after tight_layout."""
+    "linestyle", "label". Call after tight_layout. Returns the legend."""
     handles = [Line2D([], [], color=s["color"], linestyle=s["linestyle"],
                       linewidth=1.5, label=s["label"]) for s in styles]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles),
-               bbox_to_anchor=(0.5, 1.0), fontsize=8)
+    return fig.legend(handles=handles, loc="lower center", ncol=len(handles),
+                      bbox_to_anchor=(0.5, 1.0), fontsize=8)
+
+
+def figure_title(fig, title, above=None):
+    """Bold title on top of the figure, above the artist `above` if given
+    (e.g. the outline legend). Call after tight_layout."""
+    y = 1.0
+    if above is not None:
+        y = above.get_window_extent().transformed(
+            fig.transFigure.inverted()).y1
+    fig.suptitle(title, y=y, va="bottom", fontsize=12, fontweight="bold")
 
 
 def save(fig, path):

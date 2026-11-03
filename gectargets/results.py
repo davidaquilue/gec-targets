@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
-from .config import expand_tasks, fit_dir, tau_scan_dir, targets_dir
+from .config import (expand_tasks, fit_dir, model_dir, tau_scan_dir,
+                     targets_dir)
 
 EPOCH_KEYS = ("fc_epochs", "fs_epochs")
 # Files are read in parallel: with one small file per subject, the time is
@@ -23,6 +24,15 @@ def save_npz(path, **arrays):
     with open(tmp, "wb") as f:
         np.savez(f, **arrays)
     os.replace(tmp, path)
+
+
+def save_per_model(table, study, name):
+    """A study's table as one CSV per model (its "model" column), in the
+    model's folder of the study; nothing for a table without that column
+    (no rows)."""
+    if "model" in table:
+        for model, rows in table.groupby("model"):
+            rows.to_csv(model_dir(study, model) / name, index=False)
 
 
 def is_complete(path):
