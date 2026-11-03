@@ -100,7 +100,7 @@ def panel_key(task, x="eps_fs", y="eps_fc"):
 def selected_cells(cfg, tasks, fits, x="eps_fs", y="eps_fc"):
     """The two cells of each eps grid that the studies single out:
 
-    lab_default  the learning rates of cfg["study4"]["lab_default"][model]
+    lab_default  the learning rates of cfg["study3"]["lab_default"][model]
                  (None if not set or not on the grid)
     best_fs_a    the highest mean corr(empirical, simulated) FS_A over
                  subjects
@@ -108,7 +108,7 @@ def selected_cells(cfg, tasks, fits, x="eps_fs", y="eps_fc"):
     tasks: the grid tasks; fits: task id -> load_fits result. Returns
     {panel_key: {"lab_default": task or None, "best_fs_a": task}}.
     """
-    lab = cfg.get("study4", {}).get("lab_default", {})
+    lab = cfg.get("study3", {}).get("lab_default", {})
     panels = {}
     for t in tasks:
         panels.setdefault(panel_key(t, x, y), []).append(t)

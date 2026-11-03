@@ -200,3 +200,10 @@ def study_dir(cfg, name):
     path = cfg["results_root"] / "studies" / name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def model_dir(study, model):
+    """Folder of one model's figures and tables in a study's folder."""
+    path = study / model
+    path.mkdir(parents=True, exist_ok=True)
+    return path
