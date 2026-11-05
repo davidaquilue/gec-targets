@@ -18,7 +18,8 @@ MODEL_LABELS = {"legacy": "Legacy model", "network": "Network model",
                 "linear_hopf": "Linear Hopf model"}
 DATASET_LABELS = {"UCM_AAL": "UCM MEG (AAL)", "UniRoma": "UniRoma EEG",
                   "ADNI_Schaefer400": "ADNI fMRI (Schaefer 400)",
-                  "HCP_RESTLR": "HCP rest", "HCP_WMLR": "HCP working memory"}
+                  "HCP_RESTLR": "HCP rest", "HCP_WMLR": "HCP working memory",
+                  "Sleep_W": "W", "Sleep_N3": "N3"}
 # Fitting procedures (config.PROCEDURES), shown after the model's name
 PROCEDURE_LABELS = {"updated": "updated fit"}
 

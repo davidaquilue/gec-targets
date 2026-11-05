@@ -28,7 +28,8 @@
 # 2. the downstream measures: their level, and whether the fits order the
 #    subjects the same way,
 # 3. whether the measures follow the data (the empirical FS_A) or the fit,
-# 4. the paired contrast HCP working memory vs rest, at each of the fits.
+# 4. the paired contrasts between conditions (HCP working memory vs rest,
+#    sleep N3 vs wake), at each of the fits.
 #
 # Needs: the fits of the original and the updated grids (the config's sweep)
 # and, for sections 2-4, the downstream measures of the three fits (all of
@@ -57,7 +58,8 @@ from gectargets.results import load_fits, load_targets, save_per_model
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/electrophysiology.json"
 X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # the grid the cells are taken from
 UPDATED = "updated"                       # the procedure (config.PROCEDURES)
-CONTRAST = ("HCP_WMLR", "HCP_RESTLR")     # section 4: task, rest (paired)
+# Section 4: paired contrasts (a, b) between conditions, shown as a - b
+CONTRASTS = [("HCP_WMLR", "HCP_RESTLR"), ("Sleep_N3", "Sleep_W")]
 # The fits compared, in the order of the figures: one colour and marker each
 FITS = {"lab_default": {"label": "lab default", "color": "#2a78d6",
                         "marker": "o"},
@@ -452,85 +454,90 @@ for model, keys in by_model(down_keys).items():
 
 
 # %% [markdown]
-# ## 4. HCP working memory vs rest, at each fit
-# As Study 3, section 4, but at the three fits only. Both conditions are fit
-# with the same learning rates: the lab default, and for the two best FS_A
-# fits the cell with the best mean fit of FS_A averaged over the two
-# conditions (among the cells fitted for most subjects in both). Subjects
-# with a stable fit in both conditions; task - rest: Cohen's d_z =
-# mean(diff) / SD(diff), the paired t-test and, without normality, the
-# Wilcoxon signed-rank test (three tests per measure, not corrected).
+# ## 4. Paired contrasts between conditions, at each fit
+# As Study 3, section 4 (the contrasts (a, b) of CONTRASTS), but at the
+# three fits only; a contrast needs both datasets fitted on the original and
+# the updated grid. Both conditions are fit with the same learning rates:
+# the lab default, and for the two best FS_A fits the cell with the best
+# mean fit of FS_A averaged over the two conditions (among the cells fitted
+# for most subjects in both). Subjects with a stable fit in both conditions;
+# a - b: Cohen's d_z = mean(diff) / SD(diff), the paired t-test and, without
+# normality, the Wilcoxon signed-rank test (three tests per measure, not
+# corrected).
 
 # %%
-def matched_best(group_task, group_rest):
-    """(task, rest) fits of the cell, matched by its settings (tag), with
-    the best mean corr FS_A over the two conditions."""
-    rest = {t["tag"]: t for t in well_fitted(group_rest, fits)}
-    both = [(u, rest[u["tag"]]) for u in well_fitted(group_task, fits)
-            if u["tag"] in rest]
+def matched_best(group_a, group_b):
+    """(a, b) fits of the cell, matched by its settings (tag), with the best
+    mean corr FS_A over the two conditions."""
+    b_by_tag = {t["tag"]: t for t in well_fitted(group_b, fits)}
+    both = [(u, b_by_tag[u["tag"]]) for u in well_fitted(group_a, fits)
+            if u["tag"] in b_by_tag]
     if not both:
         return None
     return max(both, key=lambda p: np.nanmean(fits[p[0]["id"]]["r_fs_a"])
                + np.nanmean(fits[p[1]["id"]]["r_fs_a"]))
 
 
-task_ds, rest_ds = CONTRAST
 contrast_rows = []
-for key in comparisons:
-    if key[0] != rest_ds:
-        continue
-    key_task = (task_ds, *key[1:])
-    if key_task not in comparisons:
-        continue
-    matched = {}
-    lab_task = comparisons[key_task].get("lab_default")
-    lab_rest = comparisons[key].get("lab_default")
-    if lab_task is not None and lab_rest is not None:
-        matched["lab_default"] = (lab_task, lab_rest)
-    for name, procedure_name in (("best_fs_a", "original"),
-                                 ("updated", UPDATED)):
-        groups = [g for k, g in grids.items()
-                  if comparison_key(g[0]) in (key, key_task)
-                  and role(g[0]) == procedure_name]
-        g_task = [t for g in groups for t in g if t["dataset"] == task_ds]
-        g_rest = [t for g in groups for t in g if t["dataset"] == rest_ds]
-        pair = matched_best(g_task, g_rest) if g_task and g_rest else None
-        if pair is not None:
-            matched[name] = pair
-    for name, (u, t) in matched.items():
-        a, b = load_downstream(cfg, u), load_downstream(cfg, t)
-        if a is None or b is None:
-            print(f"Section 4: no downstream measures yet for tasks "
-                  f"{[v['id'] for v, d in ((u, a), (t, b)) if d is None]}")
+for a_ds, b_ds in CONTRASTS:
+    n_rows = len(contrast_rows)
+    for key in comparisons:
+        if key[0] != b_ds:
             continue
-        frames = [pd.DataFrame({"fdt": d["fdt"].mean(axis=1),
-                                "epr": d["epr"].astype(float)},
-                               index=d["subjects"])[d["stable"].astype(bool)]
-                  for d in (a, b)]
-        common = frames[0].index.intersection(frames[1].index)
-        row = {"comparison": f"{task_ds} vs {rest_ds} | "
-                             + comparison_name(key).split(" | ", 1)[1],
-               "model": key[2], "fit": name, "id_task": u["id"],
-               "id_rest": t["id"], X_PARAM: t["swept"][X_PARAM],
-               Y_PARAM: t["swept"][Y_PARAM], "n_subjects": len(common)}
-        for m in MEASURES:
-            x = frames[0].loc[common, m].to_numpy(float)
-            y = frames[1].loc[common, m].to_numpy(float)
-            if len(common) < 3 or not np.isfinite(x - y).all():
+        key_a = (a_ds, *key[1:])
+        if key_a not in comparisons:
+            continue
+        matched = {}
+        lab_a = comparisons[key_a].get("lab_default")
+        lab_b = comparisons[key].get("lab_default")
+        if lab_a is not None and lab_b is not None:
+            matched["lab_default"] = (lab_a, lab_b)
+        for name, procedure_name in (("best_fs_a", "original"),
+                                     ("updated", UPDATED)):
+            groups = [g for k, g in grids.items()
+                      if comparison_key(g[0]) in (key, key_a)
+                      and role(g[0]) == procedure_name]
+            g_a = [t for g in groups for t in g if t["dataset"] == a_ds]
+            g_b = [t for g in groups for t in g if t["dataset"] == b_ds]
+            pair = matched_best(g_a, g_b) if g_a and g_b else None
+            if pair is not None:
+                matched[name] = pair
+        for name, (u, t) in matched.items():
+            a, b = load_downstream(cfg, u), load_downstream(cfg, t)
+            if a is None or b is None:
+                print(f"Section 4: no downstream measures yet for tasks "
+                      f"{[v['id'] for v, d in ((u, a), (t, b)) if d is None]}")
                 continue
-            diff = x - y
-            row.update({f"{m}_task_mean": x.mean(), f"{m}_rest_mean": y.mean(),
-                        f"{m}_d_z": diff.mean() / diff.std(ddof=1),
-                        f"{m}_p_t": ttest_rel(x, y).pvalue,
-                        f"{m}_p_wilcoxon": wilcoxon(x, y).pvalue})
-        contrast_rows.append(row)
+            frames = [pd.DataFrame({"fdt": d["fdt"].mean(axis=1),
+                                    "epr": d["epr"].astype(float)},
+                                   index=d["subjects"])[
+                                       d["stable"].astype(bool)]
+                      for d in (a, b)]
+            common = frames[0].index.intersection(frames[1].index)
+            row = {"comparison": f"{a_ds} vs {comparison_name(key)}",
+                   "model": key[2], "fit": name, "dataset_a": a_ds,
+                   "dataset_b": b_ds, "id_a": u["id"], "id_b": t["id"],
+                   X_PARAM: t["swept"][X_PARAM],
+                   Y_PARAM: t["swept"][Y_PARAM], "n_subjects": len(common)}
+            for m in MEASURES:
+                x = frames[0].loc[common, m].to_numpy(float)
+                y = frames[1].loc[common, m].to_numpy(float)
+                if len(common) < 3 or not np.isfinite(x - y).all():
+                    continue
+                diff = x - y
+                row.update({f"{m}_a_mean": x.mean(), f"{m}_b_mean": y.mean(),
+                            f"{m}_d_z": diff.mean() / diff.std(ddof=1),
+                            f"{m}_p_t": ttest_rel(x, y).pvalue,
+                            f"{m}_p_wilcoxon": wilcoxon(x, y).pvalue})
+            contrast_rows.append(row)
+    if len(contrast_rows) == n_rows:
+        print(f"Section 4: no matching fits of {a_ds} and {b_ds} on both "
+              f"grids, skipped")
 contrast = pd.DataFrame(contrast_rows)
 if len(contrast):
-    save_per_model(contrast, out, "4_contrast_task_vs_rest.csv")
+    save_per_model(contrast, out, "4_contrast.csv")
     with pd.option_context("display.width", 220, "display.precision", 3):
         print(contrast.to_string(index=False))
-else:
-    print(f"Section 4 skipped: no matching fits of {task_ds} and {rest_ds}")
 
 # d_z of each fit, its paired t-test p next to it
 for model, g_model in (contrast.groupby("model") if len(contrast) else []):
@@ -540,6 +547,8 @@ for model, g_model in (contrast.groupby("model") if len(contrast) else []):
     fig, axes = figure(len(names), len(ms))
     for row, name in zip(axes, names):
         g = g_model[g_model.comparison == name]
+        a_label = dataset_label(g.dataset_a.iloc[0])
+        b_label = dataset_label(g.dataset_b.iloc[0])
         for ax, m in zip(row, ms):
             fit_names = [n for n in FITS if n in set(g.fit)]
             ax.axhline(0, color=GRAY, linewidth=1)
@@ -550,11 +559,10 @@ for model, g_model in (contrast.groupby("model") if len(contrast) else []):
                 ax.annotate(f"p {c[f'{m}_p_t']:.2g}", (i, c[f"{m}_d_z"]),
                             xytext=(8, 0), textcoords="offset points",
                             va="center", fontsize=7, color="#52514e")
-            ax.set(title=f"{dataset_label(task_ds)} vs "
-                         f"{dataset_label(rest_ds)} | {name.split(' | ')[1]}"
-                         f"\n{MEASURES[m]}: d_z (task - rest)",
+            ax.set(title=f"{a_label} vs {b_label} | {name.split(' | ')[1]}"
+                         f"\n{MEASURES[m]}: d_z ({a_label} - {b_label})",
                    xticks=range(len(fit_names)),
                    xticklabels=[FITS[n]["label"] for n in fit_names],
                    xlim=(-0.4, len(fit_names) - 0.4), ylabel="d_z")
             ax.tick_params(axis="x", labelrotation=20)
-    finish(fig, axes, model, set(g_model.fit), "4_contrast_task_vs_rest.png")
+    finish(fig, axes, model, set(g_model.fit), "4_contrast.png")
