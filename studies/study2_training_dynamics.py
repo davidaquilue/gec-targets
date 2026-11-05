@@ -28,7 +28,7 @@ from gectargets.analysis import (TARGETS, asym, corr, edge_vectors,
                                  gec_reliability, offdiag, triu)
 from gectargets.config import (expand_tasks, grid_settings, load_config,
                                model_dir, model_name, study_dir)
-from gectargets.fitting import START_ERROR, load_matrix
+from gectargets.fitting import HISTORY_KEYS, START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
 from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING, NMSE,
@@ -44,12 +44,18 @@ TRAJECTORY_TASKS = None   # task ids for section 2; None: the "none" runs
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study2")
 KEYS = {"FC": "fc", "FS": "fs", "FS_S": "fs_s", "FS_A": "fs_a"}
+# Kept for every task: the scalars and histories. The matrices (FS_sim for
+# section 1b, C for section 4) are read one task at a time where needed: all
+# of them at once do not fit in memory (e.g. 971 HCP subjects x 2N x 2N)
+SUMMARY_KEYS = ("n_iter", "stop", *(f"{m}_{v}" for m in ("r", "mse")
+                                    for v in KEYS.values()),
+                *(f"history_{k}" for k in HISTORY_KEYS))
 
 tasks, fits = [], {}
 for t in expand_tasks(cfg):
     if t["half"] != "all":
         continue
-    f = load_fits(cfg, t)
+    f = load_fits(cfg, t, keys=SUMMARY_KEYS)
     if f is None:
         print(f"task {t['id']}: no fits yet, skipped")
         continue
@@ -213,7 +219,7 @@ for t in tasks:
     if t["id"] not in on_grid:
         continue
     index, fc_emp, fs_emp = targets_of(t)
-    f = fits[t["id"]]
+    f = load_fits(cfg, t, keys=("fs_sim",))   # this task's matrices only
     values, neg_share = {c: [] for c in SIGN_COLUMNS}, []
     for s, subject in enumerate(f["subjects"]):
         fc, fs, fs_sim = fc_emp[index[subject]], fs_emp[index[subject]], \
@@ -476,13 +482,15 @@ for model, ps in by_model(stop_panels).items():
 # subjects share through the SC.
 
 # %%
+GEC_KEYS = ("C", "mask")   # read one task at a time
 rel_rows = []
 for t in tasks:
     sc_path = cfg["datasets"][t["dataset"]].get("sc_path")
     rel = gec_reliability(
-        fits[t["id"]], None if sc_path is None else load_matrix(sc_path),
-        load_fits(cfg, {**t , "half": "odd"}),
-        load_fits(cfg, {**t, "half": "even"}))
+        load_fits(cfg, t, keys=GEC_KEYS),
+        None if sc_path is None else load_matrix(sc_path),
+        load_fits(cfg, {**t, "half": "odd"}, keys=GEC_KEYS),
+        load_fits(cfg, {**t, "half": "even"}, keys=GEC_KEYS))
     rel_rows.append({"id": t["id"], "data_model": label(t),
                      "model": model_name(t), **t["swept"],
                      "convergence": t["fit"]["convergence"], **rel})
