@@ -48,7 +48,7 @@ observed:
 |---|---|---|---|
 | `legacy` | `-C`, `C_ii = sum_j abs(C_ij)` | `max(C) = maxC`; `abs(S)` if `use_abs` | lagged |
 | `network` | `-theta (I - gamma W)` | `W >= 0`, zero diagonal, spectral radius 1 | zerolag |
-| `linear_hopf` | `[[a I - L, -diag(w)], [diag(w), a I - L]]`, `L` Laplacian of C, `w = 2 pi f` | as legacy, no abs | lagged |
+| `linear_hopf` | `[[a I - L, -diag(w)], [diag(w), a I - L]]`, `L` Laplacian of C, `w = 2 pi f` | zero diagonal, `max(C) = maxC` (`coupling_norm: "max"`); no abs | lagged |
 
 * `network`: theta (1/s) is the mean decay rate over modes (`tr(B)/N`);
   `theta: "FIT"` uses the mean over nodes of `-ln(acf_i(tau)) / tau` from the
@@ -64,6 +64,16 @@ observed:
   proportional to the autocovariance at tau, which becomes negative when
   `2 pi f tau > pi/2` (alpha at 10 Hz: tau > 25 ms); the fit then fails
   (non-finite FS). Use `"fs_norm": "zerolag"` in that case.
+* `linear_hopf` `coupling_norm`: `"max"` (default, as neuronumba's
+  `FitGEC`) keeps C without self-coupling and scales it to `max(C) = maxC`;
+  the Laplacian makes the diagonal of the drift. `"diag"` is the
+  normalisation of the earlier fits, the legacy one: the row sums are put on
+  the diagonal before scaling, so `maxC` bounds the largest row sum and the
+  coupling is weaker by the largest row sum over the largest coupling
+  (about 11 times for the AAL90 sleep SC). With it the lab-default fits stopped
+  within tens of iterations, and the FDT violation did not depend on the
+  asymmetry of C (the same for (C + C')/2). Set it explicitly in the config:
+  it is part of the fit folder name.
 * Any model accepts `sigma` and `fs_norm`. FC and FS do not depend on sigma.
 
 ## 3. Learning rule (`gectargets/fitting.py`)
@@ -90,7 +100,11 @@ weights are saved with the fit (`step_weights`: FC, FS_S, FS_A). The default
 `"none"` is the original step.
 
 Every `check_every` iterations an error E is computed and the fit stops when
-`(E_old - E) / E < tol` (this includes E increasing):
+`(E_old - E) / E < tol` (this includes E increasing). tol bounds the
+improvement between two checks, not per iteration: checking every 10
+iterations stops about 10 times earlier than every 100 (neuronumba's
+default, used in the fMRI and electrophysiology configs), and a single step
+that raises E stops the fit.
 
 * `legacy`: `E = mean((FC - FC_sim)^2) + mean((FS - FS_sim)^2)`;
 * `normalized`: `E = sum_k mse_k / mean(target_k^2)` over FC, FS_S, FS_A
@@ -181,6 +195,8 @@ are logged (`history_*` in the subject's `.npz`).
 * FS is stored in the model orientation directly (no transposes).
 * The returned FC_sim / FS_sim are those of the returned C (MATLAB returned
   those of the previous iteration when the loop ran to `max_iter`).
+* The linear Hopf coupling is normalised as in neuronumba (`max(C) =
+  maxC`, no diagonal), not as fdt_eeg's legacy MOU (`coupling_norm`).
 * The linear Hopf branch keeps the full 2N covariance (in the MATLAB code
   `expm(tau A)` (2N x 2N) multiplied the N x N block, a dimension error).
 * New: the `normalized` / `fc_fs_a` / `none` convergence rules, the

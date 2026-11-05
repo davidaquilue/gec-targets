@@ -44,11 +44,12 @@
                 "eps_fc": 1e-2, "eps_fs": 1e-1},
     "linear_hopf": {"_comment": "freqs_path: one value (Hz) per node; '{subject}' in the path selects a file per subject. TODO: compute.",
                     "sigma": 0.05, "maxC": 0.2, "a": -0.02,
-                    "freqs_path": null,
+                    "coupling_norm": "max", "freqs_path": null,
                     "eps_fc": 4e-4, "eps_fs": 1e-4}
   },
 
-  "fitting": {"max_iter": 5000, "tol": 1e-5, "check_every": 10,
+  "_fitting": "check_every 100, as neuronumba's FitGEC: tol is the relative improvement between two checks, so checking every 10 iterations stops ~10x earlier, and any increase between checks (one noisy step) stops the fit.",
+  "fitting": {"max_iter": 5000, "tol": 1e-5, "check_every": 100,
               "convergence": "legacy", "log_every": 10, "n_init": 1,
               "seed": 0, "split_half": false},
 
