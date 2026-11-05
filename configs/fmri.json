@@ -43,6 +43,32 @@
       "sc_path": "$DATA_DIR/HCP/BIDS/derivatives/connectomes/SC_schaefer100_17Networks_32fold_groupconnectome_2mm_symm.csv",
       "_freqs_path": "Shares the rest frequencies of HCP_RESTLR",
       "freqs_path": "$DATA_DIR/gec_targets_results/fmri/HCP_RESTLR/nofilter/targets/node_freqs.csv"
+    },
+    "Sleep_W": {
+      "_comment": "Sleep fMRI (wake / N3), one run per subject. band null: used as stored; if the series are not band-passed add e.g. \\\"bold\\\": [0.008, 0.08] to bands and set band: \\\"bold\\\". sc_path: group SC of DataSleepW_N3.mat, same node order as the time series.",
+      "loader": "bids_epochs",
+      "root": "$DATA_DIR/fMRI Sleep Enzo/AAL90/BIDS",
+      "epochs_dir": "epochs_AAL90",
+      "modality": "bold",
+      "session": "W",
+      "band": null,
+      "atlas": "AAL90",
+      "sc_path": "$DATA_DIR/fMRI Sleep Enzo/AAL90/BIDS/derivatives/connectomes/SC_AAL90.csv",
+      "_freqs_path": "Hopf node frequencies: python scripts/compute_node_freqs.py configs/fmri.json Sleep_W",
+      "freqs_path": "$DATA_DIR/gec_targets_results/fmri/Sleep_W/nofilter/targets/node_freqs.csv"
+    },
+    "Sleep_N3": {
+      "_comment": "Sleep fMRI (wake / N3), one run per subject. band null: used as stored; if the series are not band-passed add e.g. \\\"bold\\\": [0.008, 0.08] to bands and set band: \\\"bold\\\". sc_path: group SC of DataSleepW_N3.mat, same node order as the time series.",
+      "loader": "bids_epochs",
+      "root": "$DATA_DIR/fMRI Sleep Enzo/AAL90/BIDS",
+      "epochs_dir": "epochs_AAL90",
+      "modality": "bold",
+      "session": "N3",
+      "band": null,
+      "atlas": "AAL90",
+      "sc_path": "$DATA_DIR/fMRI Sleep Enzo/AAL90/BIDS/derivatives/connectomes/SC_AAL90.csv",
+      "_freqs_path": "Hopf node frequencies: python scripts/compute_node_freqs.py configs/fmri.json Sleep_N3",
+      "freqs_path": "$DATA_DIR/gec_targets_results/fmri/Sleep_N3/nofilter/targets/node_freqs.csv"
     }
   },
 
@@ -69,7 +95,7 @@
   "sweep": [
     {
       "_comment": "Study 2: fix eps_fc, vary eps_fs (and the reverse)",
-      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
+      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR", "Sleep_W", "Sleep_N3"],
       "models": ["network", "linear_hopf"],
       "grid": {
         "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01],
@@ -78,7 +104,7 @@
     },
 
     {"_comment": "Models at their default settings",
-     "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
+     "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR", "Sleep_W", "Sleep_N3"],
      "models": ["network", "linear_hopf"]},
 
     {

@@ -12,7 +12,8 @@
 # 2. whether different learning rates order the subjects the same way,
 # 3. whether the measures follow the fit (of FS_A) or the data (the empirical
 #    FS_A),
-# 4. the paired contrast HCP working memory vs rest, cell by cell.
+# 4. the paired contrasts between conditions (HCP working memory vs rest,
+#    sleep N3 vs wake), cell by cell.
 #
 # Two cells are outlined in every grid figure: the lab's default learning
 # rates (`study3.lab_default` in the config, solid black) and the best fit of
@@ -51,7 +52,8 @@ from gectargets.results import load_fits, load_targets, save_per_model
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/electrophysiology.json"
 X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # heatmap columns, rows
-CONTRAST = ("HCP_WMLR", "HCP_RESTLR")     # section 4: task, rest (paired)
+# Section 4: paired contrasts (a, b) between conditions, shown as a - b
+CONTRASTS = [("HCP_WMLR", "HCP_RESTLR"), ("Sleep_N3", "Sleep_W")]
 ALPHA = 0.05                              # section 4: BH level over the cells
 CELLS = {"lab_default": {"color": "#0b0b0b", "linestyle": "-",
                          "label": "lab default"},
@@ -438,16 +440,18 @@ for model, keys in by_model(by_panel).items():
 
 
 # %% [markdown]
-# ## 4. HCP working memory vs rest, paired
-# The two datasets are fitted on the same grid; cells are matched by their
-# settings, subjects by their id (those with a stable fit in both). In every
-# cell, task - rest: paired t-test with its effect size Cohen's d_z =
-# mean(diff) / SD(diff), and, as a check without normality, the Wilcoxon
-# signed-rank test with the matched-pairs rank-biserial r. The heatmap
-# shows d_z; * marks the cells whose paired t-test passes Benjamini-Hochberg
-# at ALPHA over the cells of the grid. Outlined: the lab default and the
-# best FS_A fit averaged over the two conditions. Note: tau is fitted per
-# dataset, so the two conditions are fitted at different lags.
+# ## 4. Paired contrasts between conditions
+# For every contrast (a, b) of CONTRASTS (HCP working memory vs rest, sleep
+# N3 vs wake): the two datasets are fitted on the same grid; cells are
+# matched by their settings, subjects by their id (those with a stable fit
+# in both). In every cell, a - b: paired t-test with its effect size Cohen's
+# d_z = mean(diff) / SD(diff), and, as a check without normality, the
+# Wilcoxon signed-rank test with the matched-pairs rank-biserial r. The
+# heatmap shows d_z; * marks the cells whose paired t-test passes
+# Benjamini-Hochberg at ALPHA over the cells of the grid. Outlined: the lab
+# default and the best FS_A fit averaged over the two conditions. Note: tau
+# is fitted per dataset, so the two conditions may be fitted at different
+# lags.
 
 # %%
 def rank_biserial(diff):
@@ -457,40 +461,48 @@ def rank_biserial(diff):
     return (plus - minus) / (plus + minus) if len(diff) else np.nan
 
 
-# Here, variable naming is quite confusing: task_ds -> Task fMRI dataset name
-# However, each hyperparameter combination evaluated (for instance, each eps_fc,
-# eps_fs pair) is also called "task".
-task_ds, rest_ds = CONTRAST
+# Each hyperparameter set fitted is a "task" (t, u, as everywhere in this
+# study); the datasets compared are a and b. A contrast key is (a, panel key
+# of b): the panel key carries b, the variant, the model and the settings.
 pairs = {}
-for t in tasks:  # Iterate over all tasks
-    if t["dataset"] != rest_ds:  # For each task that worked on rest
-        continue
-    # Find the corresponding task (same hyperparm comb) of the task-data
-    u = next((u for u in tasks if u["dataset"] == task_ds
-              and (u["variant"], u["model"], u["tag"])
-              == (t["variant"], t["model"], t["tag"])), None)
-    if u is not None:  # If there is a match, add the pair
-        pairs.setdefault(panel_key(t), []).append((u, t))
+for a_ds, b_ds in CONTRASTS:
+    for t in tasks:
+        if t["dataset"] != b_ds:
+            continue
+        # The task of a with the same settings
+        u = next((u for u in tasks if u["dataset"] == a_ds
+                  and (u["variant"], u["model"], u["tag"])
+                  == (t["variant"], t["model"], t["tag"])), None)
+        if u is not None:
+            pairs.setdefault((a_ds, panel_key(t)), []).append((u, t))
+    if not any(k[0] == a_ds and k[1][0] == b_ds for k in pairs):
+        print(f"Section 4: no matching fits of {a_ds} and {b_ds}, skipped")
 
-def contrast_name(key):
-    return f"{task_ds} vs {rest_ds} | " + panel_name(key).split(" | ", 1)[1]
+
+def contrast_name(ckey):
+    a_ds, key = ckey
+    return f"{a_ds} vs {panel_name(key)}"
 
 
-def contrast_title(key):
-    return " | ".join([f"{dataset_label(task_ds)} vs {dataset_label(rest_ds)}",
+def contrast_title(ckey):
+    a_ds, key = ckey
+    return " | ".join([f"{dataset_label(a_ds)} vs {dataset_label(key[0])}",
                        key[1]] + settings(key[3]))
 
 
+def contrast_file(ckey):
+    return f"{ckey[0]}_vs_{ckey[1][0]}"
+
+
 contrast_rows = []
-for key, group in pairs.items():
-    name = contrast_name(key)
+for ckey, group in pairs.items():
+    name = contrast_name(ckey)
     for u, t in group:
-        # Get data of the "task" (hyperparam. comb.) for task (a) and rest (b)
         a = data[(data.id == u["id"]) & data.stable].set_index("subject")
         b = data[(data.id == t["id"]) & data.stable].set_index("subject")
-        common = a.index.intersection(b.index)  # To ensure same sub ordering in both
-        row = {"panel": name, "model": key[2], "id_task": u["id"],
-               "id_rest": t["id"],
+        common = a.index.intersection(b.index)  # same subjects, same order
+        row = {"panel": name, "model": ckey[1][2], "dataset_a": u["dataset"],
+               "dataset_b": t["dataset"], "id_a": u["id"], "id_b": t["id"],
                X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
                "n_subjects": len(common),
                "r_fs_a_mean": (a.r_fs_a.mean() + b.r_fs_a.mean()) / 2}
@@ -499,7 +511,7 @@ for key, group in pairs.items():
             diff = x - y
             if len(diff) < 3:  # Cases with very few data
                 continue
-            row.update({f"{m}_task_mean": x.mean(), f"{m}_rest_mean": y.mean(),
+            row.update({f"{m}_a_mean": x.mean(), f"{m}_b_mean": y.mean(),
                         f"{m}_d_z": diff.mean() / diff.std(ddof=1),
                         f"{m}_p_t": ttest_rel(x, y).pvalue,
                         f"{m}_rank_biserial": rank_biserial(diff),
@@ -516,18 +528,16 @@ for m in MEASURES:
             contrast.loc[g.index[ok], f"{m}_q_t"] = false_discovery_control(
                 g.loc[ok, f"{m}_p_t"])
 if len(contrast):
-    write(contrast, "4_contrast_task_vs_rest.csv")
+    write(contrast, "4_contrast.csv")
     with pd.option_context("display.width", 220, "display.precision", 3):
         print(contrast.to_string(index=False))
-else:
-    print(f"Section 4 skipped: no matching fits of {task_ds} and {rest_ds}")
 
 
-def contrast_outlines(key, g):
+def contrast_outlines(ckey, g):
     """Lab default (same learning rates for both conditions) and the best
     FS_A fit averaged over the two conditions."""
     marks = []
-    lab = cells.get(key, {}).get("lab_default")
+    lab = cells.get(ckey[1], {}).get("lab_default")
     if lab is not None:
         marks.append({"cell": (lab["swept"][Y_PARAM], lab["swept"][X_PARAM]),
                       **CELLS["lab_default"]})
@@ -538,30 +548,39 @@ def contrast_outlines(key, g):
 
 
 if len(contrast):
-    for model, keys in by_model(pairs).items():
+    # One figure per contrast and model
+    figures = {}
+    for ckey in pairs:
+        figures.setdefault((contrast_file(ckey), ckey[1][2]), []).append(ckey)
+    for (file, model), ckeys in figures.items():
+        a_label, b_label = (dataset_label(ckeys[0][0]),
+                            dataset_label(ckeys[0][1][0]))
         ms = model_measures(model)
-        fig, axes = figure(len(keys), len(ms))
-        for row, key in zip(axes, keys):
-            g = contrast[contrast.panel == contrast_name(key)]
-            marks = contrast_outlines(key, g)
+        fig, axes = figure(len(ckeys), len(ms))
+        for row, ckey in zip(axes, ckeys):
+            g = contrast[contrast.panel == contrast_name(ckey)]
+            marks = contrast_outlines(ckey, g)
             for ax, m in zip(row, ms):
                 if f"{m}_d_z" not in g or g[f"{m}_d_z"].isna().all():
                     continue
                 grid = grid_of(g, f"{m}_d_z")
                 vmax = np.nanmax(np.abs(grid.to_numpy(float)))
-                heat_panel(ax, grid, f"{contrast_title(key)}\n{MEASURES[m]}: "
-                           f"d_z (task - rest)", Normalize(-vmax, vmax),
-                           DIVERGING, ".2f", outlines=marks)
+                heat_panel(ax, grid, f"{contrast_title(ckey)}\n{MEASURES[m]}: "
+                           f"d_z ({a_label} - {b_label})",
+                           Normalize(-vmax, vmax), DIVERGING, ".2f",
+                           outlines=marks)
                 q = grid_of(g, f"{m}_q_t").to_numpy(float)
                 for i, j in zip(*np.nonzero(q < ALPHA)):
                     ax.text(j + 0.88, i + 0.8, "*", ha="center", va="center",
                             fontsize=9, color="#0b0b0b")
-        finish(fig, axes, model, keys, "4_contrast_task_vs_rest.png")
+        finish(fig, axes, model, [k[1] for k in ckeys],
+               f"4_contrast_{file}.png")
 
-    # Per subject, rest -> task, at the two outlined cells
-    for key in pairs:
-        g = contrast[contrast.panel == contrast_name(key)]
-        marks = contrast_outlines(key, g)
+    # Per subject, b -> a, at the two outlined cells
+    for ckey in pairs:
+        model, variant = ckey[1][2], ckey[1][1]
+        g = contrast[contrast.panel == contrast_name(ckey)]
+        marks = contrast_outlines(ckey, g)
         has = [m for m in MEASURES if f"{m}_d_z" in g
                and g[f"{m}_d_z"].notna().any()]
         fig, axes = figure(len(has), len(marks))
@@ -569,18 +588,19 @@ if len(contrast):
             for ax, mark in zip(row, marks):
                 c = g[np.isclose(g[Y_PARAM], mark["cell"][0])
                       & np.isclose(g[X_PARAM], mark["cell"][1])].iloc[0]
-                a = data[(data.id == c.id_task) & data.stable].set_index(
+                a = data[(data.id == c.id_a) & data.stable].set_index(
                     "subject")[m]
-                b = data[(data.id == c.id_rest) & data.stable].set_index(
+                b = data[(data.id == c.id_b) & data.stable].set_index(
                     "subject")[m]
                 both = pd.concat([b, a], axis=1, join="inner").to_numpy()
                 ax.plot([0, 1], both.T, color=GRAY, linewidth=0.6, alpha=0.5)
                 ax.plot([0, 1], both.mean(axis=0), color=mark["color"],
                         linestyle=mark["linestyle"], linewidth=2.5)
-                ax.set(xticks=[0, 1], xticklabels=[dataset_label(rest_ds),
-                                                   dataset_label(task_ds)],
+                ax.set(xticks=[0, 1], xticklabels=[dataset_label(c.dataset_b),
+                                                   dataset_label(c.dataset_a)],
                        ylabel=MEASURES[m], title=f"{mark['label']}: "
                        f"d_z {c[f'{m}_d_z']:.2f}, q {c[f'{m}_q_t']:.2g}")
         fig.tight_layout()
-        figure_title(fig, f"{model_label(key[2])}\n{contrast_title(key)}")
-        save(fig, model_dir(out, key[2]) / f"4_paired_{key[1]}.png")
+        figure_title(fig, f"{model_label(model)}\n{contrast_title(ckey)}")
+        save(fig, model_dir(out, model)
+             / f"4_paired_{contrast_file(ckey)}_{variant}.png")
