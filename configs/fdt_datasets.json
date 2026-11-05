@@ -77,7 +77,7 @@
                 "eps_fc": 1e-2, "eps_fs": 1e-1},
     "linear_hopf": {"_comment": "freqs_path: one value (Hz) per node; '{subject}' in the path selects a file per subject. TODO: compute.",
                     "sigma": 0.05, "maxC": 0.2, "a": -0.02,
-                    "freqs_path": null,
+                    "coupling_norm": "max", "freqs_path": null,
                     "eps_fc": 4e-4, "eps_fs": 1e-4}
   },
 

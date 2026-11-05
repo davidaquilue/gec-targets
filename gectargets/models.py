@@ -25,8 +25,11 @@ network      dx/dt = -theta (I - gamma W) x. W >= 0, zero diagonal, spectral
              gamma < 1 is stable. FS normalisation "zerolag".
 linear_hopf  Linearised Hopf (Stuart-Landau) oscillators, x and y per node:
              A = [[a I - L, -diag(w)], [diag(w), a I - L]], L the Laplacian
-             of C (normalised as legacy), w = 2 pi f with one frequency per
-             node (``freqs_path``). Only x is observed. FS "lagged".
+             of C, w = 2 pi f with one frequency per node (``freqs_path``).
+             Only x is observed. FS "lagged". ``coupling_norm`` "max" (as
+             neuronumba): zero diagonal, max(C) = maxC; "diag" (the earlier
+             fits): normalised as legacy, so max(C) is the largest row sum
+             and the coupling is much weaker (~11x for the AAL90 sleep SC).
 """
 import numpy as np
 from scipy.linalg import expm, solve_continuous_lyapunov
@@ -114,11 +117,25 @@ class Network(GECModel):
 
 
 class LinearHopf(Legacy):
-    def __init__(self, freqs, a=-0.02, maxC=0.2, sigma=0.05, fs_norm=None):
+    def __init__(self, freqs, a=-0.02, maxC=0.2, sigma=0.05, fs_norm=None,
+                 coupling_norm="max"):
         super().__init__(maxC=maxC, use_abs=False, sigma=sigma,
                          fs_norm=fs_norm)
+        if coupling_norm not in COUPLING_NORMS:
+            raise ValueError(f"coupling_norm '{coupling_norm}' is not one of "
+                             f"{COUPLING_NORMS}")
         self.omega = 2 * np.pi * np.asarray(freqs, dtype=float).ravel()
         self.a = a
+        self.coupling_norm = coupling_norm
+
+    def normalize(self, C):
+        if self.coupling_norm == "diag":
+            return super().normalize(C)
+        # As neuronumba's FitGEC (NormMethod.MAX): no self-coupling, the
+        # largest coupling is maxC. The Laplacian in the jacobian makes the
+        # diagonal; the legacy one (row sums) only shrank the coupling.
+        C = C * (1 - np.eye(len(C)))
+        return C / C.max() * self.maxC
 
     def jacobian(self, C):
         n = len(C)
@@ -131,6 +148,9 @@ class LinearHopf(Legacy):
 
 
 MODELS = {"legacy": Legacy, "network": Network, "linear_hopf": LinearHopf}
+# linear_hopf coupling normalisations: "max" (neuronumba, max C = maxC) and
+# "diag" (the earlier fits: legacy normalisation, max row sum = maxC)
+COUPLING_NORMS = ("max", "diag")
 
 
 def load_freqs(path, subject):

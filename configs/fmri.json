@@ -1,5 +1,5 @@
 {
-  "_comment": "fMRI datasets: ADNI, HCP rest and HCP working memory. Paths accept $ENV_VARS; $DATA_DIR is set in .env.",
+  "_comment": "fMRI datasets: ADNI, HCP rest and working memory, sleep wake and N3; linear_hopf model only. Paths accept $ENV_VARS; $DATA_DIR is set in .env.",
   "results_root": "$DATA_DIR/gec_targets_results/fmri",
   "n_jobs": 8,
 
@@ -78,14 +78,15 @@
 
   "models": {
     "linear_hopf": {"_comment": "freqs_path is set per dataset (datasets block). fs_norm zerolag, as the empirical FS: with the legacy 'lagged' normalisation FS_ii ~ cos(2 pi f tau) turns negative for f > 1 / (4 tau), ~0.042 Hz at ADNI's tau (6 s), inside the fMRI band, and the fit fails.",
+                    "_coupling_norm": "max: as neuronumba, max(C) = maxC. 'diag' reproduces the earlier fits (legacy normalisation, max row sum = maxC, ~11x weaker coupling for AAL90). Set explicitly: it is part of the fit folder name.",
                     "sigma": 0.05, "maxC": 0.2, "a": -0.02,
-                    "fs_norm": "zerolag", "freqs_path": null,
-                    "eps_fc": 4e-4, "eps_fs": 1e-4},
-    "network": {"sigma": 0.05, "theta": "FIT", "gamma": 0.8,
-            "eps_fc": 1e-2, "eps_fs": 1e-1}
+                    "fs_norm": "zerolag", "coupling_norm": "max",
+                    "freqs_path": null,
+                    "eps_fc": 4e-4, "eps_fs": 1e-4}
   },
 
-  "fitting": {"max_iter": 5000, "tol": 1e-5, "check_every": 10,
+  "_fitting": "check_every 100, as neuronumba's FitGEC: tol is the relative improvement between two checks, so checking every 10 iterations stops ~10x earlier, and any increase between checks (one noisy step) stops the fit.",
+  "fitting": {"max_iter": 5000, "tol": 1e-5, "check_every": 100,
               "convergence": "legacy", "log_every": 10, "n_init": 1,
               "seed": 0, "split_half": false},
 
@@ -96,7 +97,7 @@
     {
       "_comment": "Study 2: fix eps_fc, vary eps_fs (and the reverse)",
       "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR", "Sleep_W", "Sleep_N3"],
-      "models": ["network", "linear_hopf"],
+      "models": ["linear_hopf"],
       "grid": {
         "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01],
         "eps_fs": [1e-4, 5e-4, 0.001, 0.005, 0.01]
@@ -105,10 +106,10 @@
 
     {"_comment": "Models at their default settings",
      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR", "Sleep_W", "Sleep_N3"],
-     "models": ["network", "linear_hopf"]},
+     "models": ["linear_hopf"]},
 
     {
-      "_comment": "Updated fit (config.PROCEDURES 'updated': weighted step, FC + FS_A stopping rule): the Study 2 grid. Studies 2 and 3 show it as models of their own (network_updated, linear_hopf_updated); Study 4 compares it with the original fit.",
+      "_comment": "Updated fit (config.PROCEDURES 'updated': weighted step, FC + FS_A stopping rule): the Study 2 grid. Studies 2 and 3 show it as a model of its own (linear_hopf_updated); Study 4 compares it with the original fit.",
       "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
       "models": ["linear_hopf"],
       "grid": {
