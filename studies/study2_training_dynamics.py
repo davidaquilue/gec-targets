@@ -4,8 +4,9 @@
 # Every fit logs, every `log_every` iterations, the correlation between the
 # empirical and simulated FC, FS, FS_S and FS_A. Here we look at
 # 1. the final fit quality across hyperparameters (e.g. eps_fs at fixed
-#    eps_fc and the reverse), and (1b) the fit of FS and FS_A on the edges
-#    with negative FC, which the models cannot reproduce,
+#    eps_fc and the reverse), (1b) the fit of FS and FS_A on the edges
+#    with negative FC, which the models cannot reproduce, and (1c) the final
+#    error, which, unlike the correlation, also sees the scale,
 # 2. the trajectories of the four correlations during training,
 # 3. when the fit stops (its error, FC + FS, no longer improves), whether
 #    FC, FS, FS_S and FS_A have each stopped improving too,
@@ -23,13 +24,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from gectargets.analysis import (TARGETS, asym, corr, gec_reliability,
-                                 offdiag, triu)
-from gectargets.config import expand_tasks, load_config, model_dir, study_dir
-from gectargets.fitting import START_ERROR, load_matrix
+from gectargets.analysis import (TARGETS, asym, corr, edge_vectors,
+                                 gec_reliability, offdiag, triu)
+from gectargets.config import (expand_tasks, grid_settings, load_config,
+                               model_dir, model_name, study_dir)
+from gectargets.fitting import HISTORY_KEYS, START_ERROR, load_matrix
 from matplotlib.colors import LogNorm, SymLogNorm
 
-from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING,
+from gectargets.plotting import (TARGET_COLORS, GRAY, CORR, DIVERGING, NMSE,
                                  SEQUENTIAL, dataset_label, figure_title,
                                  heat_panel, model_label, save)
 from gectargets.results import load_fits, load_targets, save_per_model
@@ -42,12 +44,18 @@ TRAJECTORY_TASKS = None   # task ids for section 2; None: the "none" runs
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study2")
 KEYS = {"FC": "fc", "FS": "fs", "FS_S": "fs_s", "FS_A": "fs_a"}
+# Kept for every task: the scalars and histories. The matrices (FS_sim for
+# section 1b, C for section 4) are read one task at a time where needed: all
+# of them at once do not fit in memory (e.g. 971 HCP subjects x 2N x 2N)
+SUMMARY_KEYS = ("n_iter", "stop", *(f"{m}_{v}" for m in ("r", "mse")
+                                    for v in KEYS.values()),
+                *(f"history_{k}" for k in HISTORY_KEYS))
 
 tasks, fits = [], {}
 for t in expand_tasks(cfg):
     if t["half"] != "all":
         continue
-    f = load_fits(cfg, t)
+    f = load_fits(cfg, t, keys=SUMMARY_KEYS)
     if f is None:
         print(f"task {t['id']}: no fits yet, skipped")
         continue
@@ -57,7 +65,10 @@ print(f"{len(tasks)} tasks with results")
 
 
 def label(t):
-    return f"{t['dataset']} | {t['variant']} | {t['model']}"
+    """Dataset, variant and model; a fit with another procedure than the
+    original (config.PROCEDURES) is a model of its own, e.g.
+    "network_updated", with its own folder and figures."""
+    return f"{t['dataset']} | {t['variant']} | {model_name(t)}"
 
 
 def by_model(panels):
@@ -86,7 +97,7 @@ def finish(fig, model, name):
 rows = []
 for t in tasks:
     f = fits[t["id"]]
-    rows.append({"id": t["id"], "data_model": label(t), "model": t["model"],
+    rows.append({"id": t["id"], "data_model": label(t), "model": model_name(t),
                  **{k: t["fit"][k] for k in ("eps_fc", "eps_fs",
                                               "convergence")},
                  **t["model_params"], "n_subjects": len(f["subjects"]),
@@ -115,9 +126,9 @@ with pd.option_context("display.width", 220, "display.precision", 3):
 # %%
 def panel_name(t):
     """data_model plus the swept settings other than the two grid axes (the
-    preprocessing options are already in the variant)."""
-    extra = {k: v for k, v in t["swept"].items()
-             if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
+    preprocessing options are already in the variant, the procedure in the
+    model)."""
+    extra = grid_settings(t, (X_PARAM, Y_PARAM))
     return " | ".join([label(t)] + settings(extra))
 
 
@@ -128,8 +139,7 @@ def settings(extra):
 
 def panel_title(t):
     """Title of a panel in the figures; the model is the figure's title."""
-    extra = {k: v for k, v in t["swept"].items()
-             if k not in (X_PARAM, Y_PARAM, "envelope", "orthogonalize")}
+    extra = grid_settings(t, (X_PARAM, Y_PARAM))
     return " | ".join([dataset_label(t["dataset"]), t["variant"]]
                       + settings(extra))
 
@@ -190,17 +200,26 @@ def mean_finite(values):
     return v[np.isfinite(v)].mean() if np.isfinite(v).any() else np.nan
 
 
-targets_by_data, sign_rows = {}, []
+targets_by_data = {}
+
+
+def targets_of(t):
+    """(subject -> row, FC, FS) of the task's targets, read once per dataset
+    and variant."""
+    key = (t["dataset"], t["variant"])
+    if key not in targets_by_data:
+        d = load_targets(cfg, *key, keys=("fc", "fs"))
+        targets_by_data[key] = ({s: i for i, s in enumerate(d["subjects"])},
+                                d["fc"], d["fs"])
+    return targets_by_data[key]
+
+
+sign_rows = []
 for t in tasks:
     if t["id"] not in on_grid:
         continue
-    key = (t["dataset"], t["variant"])
-    if key not in targets_by_data:
-        d = load_targets(cfg, *key)
-        targets_by_data[key] = ({s: i for i, s in enumerate(d["subjects"])},
-                                d["fc"], d["fs"])
-    index, fc_emp, fs_emp = targets_by_data[key]
-    f = fits[t["id"]]
+    index, fc_emp, fs_emp = targets_of(t)
+    f = load_fits(cfg, t, keys=("fs_sim",))   # this task's matrices only
     values, neg_share = {c: [] for c in SIGN_COLUMNS}, []
     for s, subject in enumerate(f["subjects"]):
         fc, fs, fs_sim = fc_emp[index[subject]], fs_emp[index[subject]], \
@@ -213,7 +232,7 @@ for t in tasks:
             select = fc_edges < 0 if op == "<" else fc_edges > 0
             values[column].append(corr_on(emp, sim, select))
     sign_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
-                      "model": t["model"],
+                      "model": model_name(t),
                       X_PARAM: t["swept"][X_PARAM],
                       Y_PARAM: t["swept"][Y_PARAM],
                       "neg_fc_share": np.median(neg_share),
@@ -238,6 +257,54 @@ for model, ps in by_model(sign_panels).items():
                          f"mean corr")
             heat_panel(ax, grids[c], title, *CORR, ".2f", best=True)
     finish(fig, model, "1b_negative_fc_edges.png")
+
+
+# %% [markdown]
+# ## 1c. Final fit error across hyperparameters
+# A correlation does not see the scale: a simulated FS_A a hundred times
+# smaller than the data's can still correlate highly with it. Here, the mse
+# of each target at the end of the fit, on the edges of section 1, divided
+# by the subject's mean square of the empirical edges:
+#
+#     nmse = mean((emp - sim)^2) / mean(emp^2)
+#
+# 0 is a perfect fit and 1 no better than predicting zero (above 1: worse).
+# Mean over subjects, on the grid of section 1. Every panel shares one
+# scale, 0 to 1, gray, darker = larger error (values above 1 take the
+# darkest gray; the annotation gives them); the outlined cell is the lowest
+# of the panel.
+
+# %%
+nmse_rows = []
+for t in tasks:
+    if t["id"] not in on_grid:
+        continue
+    index, fc_emp, fs_emp = targets_of(t)
+    f = fits[t["id"]]
+    rows_of = [index[s] for s in f["subjects"]]
+    power = {k: np.mean(v ** 2, axis=-1) for k, v in
+             edge_vectors(fc_emp[rows_of], fs_emp[rows_of]).items()}
+    nmse_rows.append({"id": t["id"], "panel": on_grid[t["id"]],
+                      "model": model_name(t),
+                      X_PARAM: t["swept"][X_PARAM],
+                      Y_PARAM: t["swept"][Y_PARAM],
+                      **{f"nmse_{k}": float(np.nanmean(f[f"mse_{v}"]
+                                                       / power[k]))
+                         for k, v in KEYS.items()}})
+nmse_table = pd.DataFrame(nmse_rows)
+save_per_model(nmse_table, out, "1c_final_fit_error.csv")
+
+nmse_panels = [(name, g) for name, g in nmse_table.groupby("panel", sort=False)
+               if len(g) > 1] if len(nmse_table) else []
+for model, ps in by_model(nmse_panels).items():
+    fig, axes = figure(len(ps), len(TARGETS))
+    for row, (name, g) in zip(axes, ps):
+        for ax, key in zip(row, TARGETS):
+            grid = g.pivot(index=Y_PARAM, columns=X_PARAM,
+                           values=f"nmse_{key}")
+            heat_panel(ax, grid, f"{titles[name]}\n{key}: mean mse / "
+                       f"mean square", *NMSE, ".2f", best="min")
+    finish(fig, model, "1c_final_fit_error.png")
 
 
 # %% [markdown]
@@ -282,7 +349,7 @@ selected = TRAJECTORY_TASKS or [t["id"] for t in tasks
 sel_tasks = {}
 for t in tasks:
     if t["id"] in selected:
-        sel_tasks.setdefault(t["model"], []).append(t)
+        sel_tasks.setdefault(model_name(t), []).append(t)
 for model, group in sel_tasks.items():
     fig, axes = figure(len(group), len(TARGETS))
     for row, t in zip(axes, group):
@@ -323,7 +390,9 @@ for model, group in sel_tasks.items():
 #   went up).
 #
 # "rule" is E itself (<= 1 by construction, unless the fit ran to
-# `max_iter`). Runs with `convergence: "none"` are read at the iteration
+# `max_iter`); for a fit with another stopping rule (e.g. the updated fit:
+# normalised FC + FS_A, see config.PROCEDURES) it is that rule's error. Runs
+# with `convergence: "none"` are read at the iteration
 # where the default rule would have stopped. Heatmap: median over subjects,
 # one shared scale per row; table: also the fraction of subjects whose part
 # was still improving (ratio > 1).
@@ -362,7 +431,7 @@ for t in tasks:
     f = fits[t["id"]]
     window, tol = t["fit"]["check_every"], t["fit"]["tol"]
     stops = [stop_point(t, f, s) for s in range(len(f["subjects"]))]
-    row = {"id": t["id"], "data_model": label(t), "model": t["model"],
+    row = {"id": t["id"], "data_model": label(t), "model": model_name(t),
            **t["swept"], "convergence": t["fit"]["convergence"],
            "stop_iter_median": np.median(stops)}
     for part, key in PARTS.items():
@@ -413,15 +482,17 @@ for model, ps in by_model(stop_panels).items():
 # subjects share through the SC.
 
 # %%
+GEC_KEYS = ("C", "mask")   # read one task at a time
 rel_rows = []
 for t in tasks:
     sc_path = cfg["datasets"][t["dataset"]].get("sc_path")
     rel = gec_reliability(
-        fits[t["id"]], None if sc_path is None else load_matrix(sc_path),
-        load_fits(cfg, {**t , "half": "odd"}),
-        load_fits(cfg, {**t, "half": "even"}))
+        load_fits(cfg, t, keys=GEC_KEYS),
+        None if sc_path is None else load_matrix(sc_path),
+        load_fits(cfg, {**t, "half": "odd"}, keys=GEC_KEYS),
+        load_fits(cfg, {**t, "half": "even"}, keys=GEC_KEYS))
     rel_rows.append({"id": t["id"], "data_model": label(t),
-                     "model": t["model"], **t["swept"],
+                     "model": model_name(t), **t["swept"],
                      "convergence": t["fit"]["convergence"], **rel})
 reliability = pd.DataFrame(rel_rows)
 save_per_model(reliability, out, "4_gec_reliability.csv")

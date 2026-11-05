@@ -79,6 +79,17 @@
 
     {"_comment": "Models at their default settings",
      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
-     "models": ["network", "linear_hopf"]}
+     "models": ["network", "linear_hopf"]},
+
+    {
+      "_comment": "Updated fit (config.PROCEDURES 'updated': weighted step, FC + FS_A stopping rule): the Study 2 grid. Studies 2 and 3 show it as models of their own (network_updated, linear_hopf_updated); Study 4 compares it with the original fit.",
+      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
+      "models": ["linear_hopf"],
+      "grid": {
+        "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01],
+        "eps_fs": [1e-4, 5e-4, 0.001, 0.005, 0.01],
+        "step_norm": ["rms"], "convergence": ["fc_fs_a"]
+      }
+    }
   ]
 }

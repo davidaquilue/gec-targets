@@ -75,12 +75,27 @@ index), on the entries that are non-zero at the start:
     C += eps_fc (FC - FC_sim) + eps_fs (FS - FS_sim)
     C  = max(C, 0);  C = constraint(C)
 
+With `step_norm: "rms"` (the updated fit of Study 4, with `fc_fs_a`) the FS
+error is split into its symmetric
+and antisymmetric parts, each scaled to the size of FC:
+
+    C += eps_fc dFC + eps_fs (w_S dFS_S + w_A dFS_A)
+    w_k = rms(FC) / rms(target_k)
+
+with the rms over the off-diagonal entries (upper triangle) of the
+subject's own empirical targets, so that FS_A, much smaller than FC, pulls
+as hard on C as FC does. FC keeps weight 1, so eps_fc means the same as in
+the original step; w_S is close to 1 when FS_S is of the size of FC. The
+weights are saved with the fit (`step_weights`: FC, FS_S, FS_A). The default
+`"none"` is the original step.
+
 Every `check_every` iterations an error E is computed and the fit stops when
 `(E_old - E) / E < tol` (this includes E increasing):
 
 * `legacy`: `E = mean((FC - FC_sim)^2) + mean((FS - FS_sim)^2)`;
 * `normalized`: `E = sum_k mse_k / mean(target_k^2)` over FC, FS_S, FS_A
   (off-diagonal), so FS_A counts as much as FC;
+* `fc_fs_a` (the updated fit): as `normalized`, over FC and FS_A only;
 * `none`: never stop before `max_iter`.
 
 Note `mse(FS) = mse(FS_S) + mse(FS_A)`: the legacy error contains FS_A, but
@@ -168,7 +183,7 @@ are logged (`history_*` in the subject's `.npz`).
   those of the previous iteration when the loop ran to `max_iter`).
 * The linear Hopf branch keeps the full 2N covariance (in the MATLAB code
   `expm(tau A)` (2N x 2N) multiplied the N x N block, a dimension error).
-* New: the `normalized` / `none` convergence rules, the logged history,
-  `split_half`.
+* New: the `normalized` / `fc_fs_a` / `none` convergence rules, the
+  weighted step (`step_norm`), the logged history, `split_half`.
 * Not ported: `legacy_noabs` (use `legacy` with `"use_abs": false`), the
   leakage operator M (the fit loop can take it later: `M S M'`).
