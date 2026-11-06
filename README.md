@@ -72,8 +72,8 @@ relative to the config file and may contain `$ENV_VARS`.
 | Block | Content |
 |---|---|
 | `results_root` | where everything is written |
-| `datasets` | one entry per dataset: loader, paths, `band` (`null` = use as stored, e.g. fMRI), `sc_path` (`null` = seeded random initialisation, e.g. channel-space EEG), optional `n_epochs` (fixed number of random epochs per subject) and `freqs_path` (node frequencies of the `linear_hopf` model, from `scripts/compute_node_freqs.py CONFIG DATASET`) |
-| `bands` | band name -> `[f_low, f_high]` Hz |
+| `datasets` | one entry per dataset: loader, paths, `band` (`null` = use as stored, e.g. the already filtered ADNI fMRI; `bold` for the HCP and sleep fMRI), `sc_path` (`null` = seeded random initialisation, e.g. channel-space EEG), optional `n_epochs` (fixed number of random epochs per subject) and `freqs_path` (node frequencies of the `linear_hopf` model, from `scripts/compute_node_freqs.py CONFIG DATASET`) |
+| `bands` | band name -> `[f_low, f_high]` Hz (4th-order Butterworth) or `{"hz": [f_low, f_high], "order": n}` |
 | `preprocessing` | `envelope`, `orthogonalize` (booleans), `tau` (`"FIT"` or samples) |
 | `models` | default parameters of each model, including its learning rates `eps_fc`, `eps_fs` |
 | `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `fc_fs_a` / `none`), `step_norm` (`none` / `rms`, default `none`), `log_every`, `n_init`, `seed`, `split_half` |
@@ -92,7 +92,7 @@ relative to the config file and may contain `$ENV_VARS`.
 <results_root>/studies/study5_onsager/linear_hopf/...
 ```
 
-`variant` is the band plus `_env` / `_orth` (e.g. `alpha_env`, `nofilter`);
+`variant` is the band plus `_env` / `_orth` (e.g. `alpha_env`, `bold`, `nofilter`);
 `tag` lists the hyperparameters plus a short hash of all settings; `half` is
 `all`, `odd` or `even`. A setting added after the first fits (`step_norm`)
 is left out of the tag at its default, so the folders of earlier fits do

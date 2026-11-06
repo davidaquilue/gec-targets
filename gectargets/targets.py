@@ -38,10 +38,24 @@ ACF_THRESHOLD = 1 / np.e
 
 
 # ----------------------------------------------------------- preprocessing
-def bandpass(x, sfreq, band):
-    """Zero-phase 4th-order Butterworth (MNE's default IIR), last axis."""
-    sos = butter(4, band, btype="bandpass", fs=sfreq, output="sos")
+def bandpass(x, sfreq, band, order=4):
+    """Zero-phase Butterworth band-pass, last axis; order 4 is MNE's default
+    IIR (sosfiltfilt doubles the effective order)."""
+    sos = butter(order, band, btype="bandpass", fs=sfreq, output="sos")
     return sosfiltfilt(sos, x, axis=-1)
+
+
+def band_spec(cfg, ds_cfg):
+    """The dataset's band as {"hz": [f_low, f_high], "order": n}, or None
+    (``band: null``, used as stored). In the config's ``bands`` a band is
+    [f_low, f_high] (order 4) or {"hz": [f_low, f_high], "order": n}."""
+    name = ds_cfg.get("band")
+    if not name:
+        return None
+    spec = cfg["bands"][name]
+    if isinstance(spec, dict):
+        return {"hz": list(spec["hz"]), "order": int(spec.get("order", 4))}
+    return {"hz": list(spec), "order": 4}
 
 
 def symmetric_orthogonalize(x):
@@ -67,7 +81,7 @@ def zscore(x):
 def preprocess(epochs, sfreq, band=None, envelope=False, orthogonalize=False):
     x = np.asarray(epochs, dtype=float)
     if band is not None:
-        x = bandpass(x, sfreq, band)
+        x = bandpass(x, sfreq, band["hz"], band["order"])
     x = detrend(x, axis=-1)
     if orthogonalize:
         x = symmetric_orthogonalize(x)
@@ -166,7 +180,7 @@ def compute_targets(cfg, dataset, prep, n_jobs=1):
     loader = get_loader(ds_cfg)
     groups = loader.subjects()
     band_name = ds_cfg.get("band")
-    band = cfg["bands"][band_name] if band_name else None
+    band = band_spec(cfg, ds_cfg)
     sfreq = loader.sfreq
     parallel = Parallel(n_jobs=n_jobs)
 
@@ -198,7 +212,9 @@ def compute_targets(cfg, dataset, prep, n_jobs=1):
     node_rates[valid] = -np.log(acf_tau[valid]) / (tau / sfreq)
 
     meta = {
-        "dataset": dataset, "band": band_name, "band_hz": band, **prep,
+        "dataset": dataset, "band": band_name,
+        "band_hz": band and band["hz"], "band_order": band and band["order"],
+        **prep,
         "sfreq": sfreq, "tau": tau, "tau_s": tau / sfreq,
         "theta": float(np.nanmean(node_rates)),
         "node_rates": node_rates.tolist(),
@@ -241,12 +257,11 @@ def node_peak_freqs(cfg, dataset, fmin=None, fmax=None, n_jobs=1):
     subjects, fmin, fmax."""
     ds_cfg = cfg["datasets"][dataset]
     loader = get_loader(ds_cfg)
-    band_name = ds_cfg.get("band")
-    band = cfg["bands"][band_name] if band_name else None
+    band = band_spec(cfg, ds_cfg)
     prep = {"envelope": False, "orthogonalize": False}
     grid = np.linspace(0, loader.sfreq / 2, N_PSD)
-    fmin = fmin if fmin is not None else (band[0] if band else grid[1])
-    fmax = fmax if fmax is not None else (band[1] if band else grid[-1])
+    fmin = fmin if fmin is not None else (band["hz"][0] if band else grid[1])
+    fmax = fmax if fmax is not None else (band["hz"][1] if band else grid[-1])
     subjects = list(loader.subjects())
     psds = Parallel(n_jobs=n_jobs)(
         delayed(_subject_psd)(loader, s, band, prep, grid) for s in subjects)
@@ -301,8 +316,7 @@ def compute_tau_scan(cfg, dataset, prep, taus, n_jobs=1):
     for d in out_dirs.values():
         d.mkdir(parents=True, exist_ok=True)
     loader = get_loader(ds_cfg)
-    band_name = ds_cfg.get("band")
-    band = cfg["bands"][band_name] if band_name else None
+    band = band_spec(cfg, ds_cfg)
     print(f"[{dataset}] tau scan: {len(todo)} subjects, lags {sorted(out_dirs)}")
     Parallel(n_jobs=n_jobs)(
         delayed(_subject_tau_scan)(loader, s, band, prep, t, out_dirs)

@@ -4,8 +4,11 @@
 
 Per subject, each epoch is
 
-1. band-passed (if the dataset has a `band`): 4th-order Butterworth,
-   zero-phase (`sosfiltfilt`);
+1. band-passed (if the dataset has a `band`): Butterworth, zero-phase
+   (`sosfiltfilt`), 4th order for the EEG / MEG bands; the fMRI datasets
+   stored without filtering (HCP, sleep) use `bold`, 0.008-0.08 Hz of 2nd
+   order, as the lab's HCP pipeline (which detrends and z-scores before
+   filtering; the order changes FC / FS by < 1e-3 in correlation);
 2. detrended (linear);
 3. optionally orthogonalised (`orthogonalize`): Löwdin symmetric
    orthogonalisation (Colclough et al. 2015), from the covariance pooled over
