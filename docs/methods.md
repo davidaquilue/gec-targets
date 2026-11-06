@@ -185,8 +185,22 @@ are logged (`history_*` in the subject's `.npz`).
     observed node j, `chij = mean_i chi_ij / mean_i chi2_ij` over the N x N
     observed block. 0 for a symmetric A (equilibrium). For linear_hopf it
     grows with the node frequencies (~f^2), irreversible by themselves;
+  * IV-FDT of the lab's updated HCP pipeline (neuro_HCP, `gectargets/ivfdt.py`,
+    checked against their `ivfdt_metrics.py` to machine precision): with
+    Gamma = -A and Q = sigma^2 I, the stationary violation
+    `I_inf = V - inv(Gamma) Q / 2` (the t -> infinity limit of I(t, s)
+    from the stationary state, every pair of variables), variance-normalised
+    `I_var = Delta^-1/2 I_inf Delta^-1/2` with Delta = diag(V), x block.
+    Per node `I_tot(i) = sqrt(mean_j I_var(i,j)^2)`, per subject its RMS over
+    nodes (their `I_tot^RMS`), and the order parameter
+    `rho_brk = ||I_skew|| / (||I_skew|| + ||I_sym||)` (RMS over the
+    off-diagonal of the antisymmetric / symmetric parts). The integral
+    violation above is close to the diagonal of `I_inf` (not normalised):
+    the two differ by the normalisation and the cross terms, and can move
+    in opposite directions with the coupling strength;
   * which FDT measures are computed and shown is the config's
-    `fdt_metrics` (`integral`, file key `fdt`; `onsager`, `fdt_onsager`);
+    `fdt_metrics` (`integral`, file key `fdt`; `onsager`, `fdt_onsager`;
+    `ivfdt`, `fdt_ivfdt` and `rho_brk`);
   * EPR: `compute_entropy_production(B, compute_theoretical_covariance(B,
     sigma), sigma)`, equal to the Phi above; legacy and network only.
   Fits that are not stable (an eigenvalue of the jacobian with real part

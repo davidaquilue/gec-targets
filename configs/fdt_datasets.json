@@ -85,8 +85,8 @@
               "convergence": "legacy", "log_every": 10, "n_init": 1,
               "seed": 0, "split_half": false},
 
-  "_fdt_metrics": "FDT measures of the downstream step and Study 3: 'integral' (fdt_eeg's analytic integral violation, key fdt) and / or 'onsager' (Deco's Onsager formalism, key fdt_onsager). A measure added later is computed into the existing downstream files, the others are kept.",
-  "fdt_metrics": ["integral", "onsager"],
+  "_fdt_metrics": "FDT measures of the downstream step and Study 3: 'integral' (fdt_eeg's analytic integral violation, key fdt) and / or 'onsager' (Deco's Onsager formalism, key fdt_onsager) and / or 'ivfdt' (the lab's updated HCP pipeline: stationary variance-normalised I_tot, key fdt_ivfdt, and rho_brk). A measure added later is computed into the existing downstream files, the others are kept.",
+  "fdt_metrics": ["integral", "onsager", "ivfdt"],
 
   "sweep": [
     {"_comment": "Study 2: fix eps_fc, vary eps_fs (and the reverse)",

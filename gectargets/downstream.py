@@ -21,6 +21,12 @@ Two FDT measures, chosen with ``fdt_metrics`` in the config (a list, default
     Deco's Onsager-formalism violation, chij of
     gectargets/onsager_fdt.fdt_violation_onsager(jacobian, sigma, N): the
     chi ratio from inv(jacobian) and the stationary covariance.
+``ivfdt`` -> "fdt_ivfdt" and "rho_brk"
+    the lab's updated HCP pipeline (neuro_HCP): the stationary integral
+    violation I_inf = V - inv(Gamma) Q / 2, variance-normalised, with the
+    cross terms; per node its I_tot, and the order parameter rho_brk
+    (gectargets/ivfdt.py). Its subject summary is the RMS of I_tot over
+    nodes (their I_tot^RMS), see fdt_summary.
 
 and, for legacy and network,
 
@@ -44,12 +50,16 @@ from .config import fit_dir, grid_settings, model_name
 from .fdt_eeg.analytic_fdt import pipeline_analytical_fdt_integral
 from .fdt_eeg.entropy import (compute_entropy_production,
                               compute_theoretical_covariance)
+from .ivfdt import ivfdt_stationary
 from .onsager_fdt import fdt_violation_onsager
 from .results import is_complete, read_npz_files, save_npz
 
 EPR_MODELS = ("legacy", "network")
 # FDT measure (config "fdt_metrics") -> its key in the downstream files
-FDT_METRICS = {"integral": "fdt", "onsager": "fdt_onsager"}
+FDT_METRICS = {"integral": "fdt", "onsager": "fdt_onsager",
+               "ivfdt": "fdt_ivfdt"}
+# Scalars saved along with a node measure (NaN where a file lacks them)
+FDT_SCALARS = {"ivfdt": "rho_brk"}
 # A best cell needs at least this share of the grid's most subjects fitted:
 # a mean over the few subjects that survive a too large step is no best
 MIN_FITTED = 0.9
@@ -63,6 +73,16 @@ def fdt_metrics(cfg):
         raise ValueError(f"fdt_metrics {metrics}: give one or more of "
                          f"{list(FDT_METRICS)}")
     return metrics
+
+
+def fdt_summary(key, nodes):
+    """One value per subject from the node values (subjects x nodes) of an
+    FDT measure: the mean over nodes, or for "fdt_ivfdt" the RMS (the lab's
+    I_tot^RMS, the RMS of I_var over the whole block)."""
+    nodes = np.asarray(nodes, dtype=float)
+    if key == "fdt_ivfdt":
+        return np.sqrt(np.mean(nodes ** 2, axis=-1))
+    return nodes.mean(axis=-1)
 
 
 def downstream_dir(cfg, task):
@@ -99,13 +119,17 @@ def subject_downstream(fit_file, model, out_file, metrics):
         if key in out:
             continue
         out[key] = np.full(n, np.nan)
+        if metric in FDT_SCALARS:
+            out[FDT_SCALARS[metric]] = np.nan
         if not stable:
             continue
         if metric == "integral":
             out[key] = pipeline_analytical_fdt_integral(
                 B, sigma * np.ones(len(B)), normalizations=False)[:n]
-        else:
+        elif metric == "onsager":
             out[key] = fdt_violation_onsager(A, sigma, n)[0]
+        else:
+            out[key], out[FDT_SCALARS[metric]] = ivfdt_stationary(A, sigma, n)
     save_npz(out_file, **out)
     return fit_file.stem, stable
 
@@ -141,9 +165,9 @@ def run_downstream(cfg, task, n_jobs=1):
 
 def load_downstream(cfg, task):
     """Downstream measures of one task: every FDT key of FDT_METRICS ("fdt",
-    "fdt_onsager"; (n_subjects, N), NaN for the subjects whose file lacks
-    it), "epr", "stable" (n_subjects,) and "subjects"; None if there are
-    none."""
+    "fdt_onsager", "fdt_ivfdt"; (n_subjects, N)) and of FDT_SCALARS
+    ("rho_brk"; (n_subjects,)), NaN for the subjects whose file lacks it;
+    "epr", "stable" (n_subjects,) and "subjects"; None if there are none."""
     files = sorted(downstream_dir(cfg, task).glob("*.npz"))
     loaded = [(p, z) for p, z in zip(files, read_npz_files(files))
               if z is not None]
@@ -154,6 +178,9 @@ def load_downstream(cfg, task):
     out = {k: np.array([z[k] if k in z else np.full(n, np.nan)
                         for _, z in loaded])
            for k in FDT_METRICS.values()}
+    out.update({k: np.array([float(z[k]) if k in z else np.nan
+                             for _, z in loaded])
+                for k in FDT_SCALARS.values()})
     out.update({k: np.array([z[k] for _, z in loaded])
                 for k in ("epr", "stable")})
     out["subjects"] = [p.stem for p, _ in loaded]

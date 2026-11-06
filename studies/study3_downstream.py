@@ -6,9 +6,11 @@
 # production rate (EPR, fdt_eeg's `compute_entropy_production`; legacy and
 # network models only, not linear_hopf). The FDT measures shown are the
 # config's `fdt_metrics`: "integral" (fdt_eeg's
-# `pipeline_analytical_fdt_integral`) and / or "onsager" (Deco's Onsager
-# formalism, `gectargets/onsager_fdt.py`); each is a measure of its own in
-# every section. See gectargets/downstream.py for how they are called. On
+# `pipeline_analytical_fdt_integral`), "onsager" (Deco's Onsager formalism,
+# `gectargets/onsager_fdt.py`) and / or "ivfdt" (the lab's updated HCP
+# pipeline: stationary, variance-normalised I_tot, summarised per subject as
+# its RMS over nodes, plus the order parameter rho_brk;
+# `gectargets/ivfdt.py`); each is a measure of its own in every section. See gectargets/downstream.py for how they are called. On
 # the eps_fc x eps_fs grid of each dataset, variant and model:
 # 1. how much the mean EPR and the mean FDT violation move across the grid,
 # 2. whether different learning rates order the subjects the same way,
@@ -46,8 +48,9 @@ from scipy.stats import (false_discovery_control, rankdata, spearmanr,
 from gectargets.analysis import asym, triu
 from gectargets.config import (expand_tasks, load_config, model_dir,
                                model_name, study_dir)
-from gectargets.downstream import (FDT_METRICS, fdt_metrics, load_downstream,
-                                   panel_key, selected_cells)
+from gectargets.downstream import (FDT_METRICS, FDT_SCALARS, fdt_metrics,
+                                   fdt_summary, load_downstream, panel_key,
+                                   selected_cells)
 from gectargets.plotting import (CORR, DIVERGING, GRAY, corr_norm,
                                  dataset_label, figure_title, heat_panel,
                                  model_label, outline_legend, save)
@@ -62,15 +65,22 @@ CELLS = {"lab_default": {"color": "#0b0b0b", "linestyle": "-",
                          "label": "lab default"},
          "best_fs_a": {"color": "#eda100", "linestyle": "--",
                        "label": "best FS_A fit"}}
-# Short names of the measures (keys of the downstream files)
-SHORT = {"fdt": "FDT", "fdt_onsager": "Onsager FDT", "epr": "EPR"}
+# Names of the measures (keys of the downstream files): short (node
+# patterns) and of the value per subject
+SHORT = {"fdt": "FDT", "fdt_onsager": "Onsager FDT",
+         "fdt_ivfdt": "IV-FDT I_tot", "rho_brk": "rho_brk", "epr": "EPR"}
+LABEL = {"fdt": "mean FDT violation", "fdt_onsager": "mean Onsager FDT violation",
+         "fdt_ivfdt": "IV-FDT I_tot^RMS", "rho_brk": "IV-FDT rho_brk",
+         "epr": "EPR"}
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study3")
-# FDT measures shown: the config's fdt_metrics; no EPR for linear_hopf
+# FDT measures shown: the config's fdt_metrics, node measures (FDT) and
+# scalars (rho_brk); no EPR for linear_hopf
 FDT = [FDT_METRICS[m] for m in fdt_metrics(cfg)]
-MEASURES = {**{m: f"mean {SHORT[m]} violation" for m in FDT}, "epr": "EPR"}
-MEAN = {m: f"mean {SHORT[m]}" if m in FDT else SHORT[m] for m in MEASURES}
+SCALARS = [FDT_SCALARS[m] for m in fdt_metrics(cfg) if m in FDT_SCALARS]
+MEASURES = {m: LABEL[m] for m in (*FDT, *SCALARS, "epr")}
+MEAN = {m: LABEL[m].replace(" violation", "") for m in MEASURES}
 
 tasks, fits, down = [], {}, {}
 for t in expand_tasks(cfg):
@@ -129,7 +139,8 @@ for t in tasks:
         X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
         "subject": d["subjects"], "stable": d["stable"].astype(bool),
         "epr": d["epr"].astype(float),
-        **{m: d[m].mean(axis=1) for m in FDT},
+        **{m: fdt_summary(m, d[m]) for m in FDT},
+        **{m: d[m].astype(float) for m in SCALARS},
         "r_fs_a": pd.Series(f["r_fs_a"], index=f["subjects"])
         .reindex(d["subjects"]).to_numpy(float)}))
     node_fdt[t["id"]] = {m: pd.DataFrame(d[m], index=d["subjects"])

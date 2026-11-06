@@ -14,7 +14,7 @@ violation). The four studies ask:
 |---|---|---|
 | 1 | What do FC, FS, FS_S and FS_A look like, how similar are they across subjects, and how reliable within a subject? | `studies/study1_empirical_targets.py` |
 | 2 | How does the fit evolve during training, and do FS_S / FS_A converge when the default rule stops? Which learning rates fit what? | `studies/study2_training_dynamics.py` |
-| 3 | How much do the learning rates move the downstream measures (FDT violation, integral and / or Onsager per `fdt_metrics`; entropy production), do they keep the order of subjects, do the measures follow the fit or the data, and does HCP working memory vs rest hold on every grid cell? | `studies/study3_downstream.py` |
+| 3 | How much do the learning rates move the downstream measures (FDT violation, integral / Onsager / stationary IV-FDT per `fdt_metrics`; entropy production), do they keep the order of subjects, do the measures follow the fit or the data, and does HCP working memory vs rest hold on every grid cell? | `studies/study3_downstream.py` |
 | 4 | Does the updated fit (FS_S and FS_A errors scaled to the size of FC in the step, stopping rule on FC + FS_A only) fit FS_A better than the original at the lab default and at its best FS_A cell, at what cost to FC, and does it change the downstream measures and the HCP contrast? | `studies/study4_fitting_procedure.py` |
 | 5 | Does Gustavo Deco's Onsager-formalism FDT violation (`inv(A)`-based chi ratio, `Compute_FDT_Violation_Onsager.m`, ported in `gectargets/onsager_fdt.py`) agree with the analytic integral violation of Study 3, per grid cell and on the sleep N3 vs wake contrast? | `studies/study5_onsager_fdt.py` |
 
@@ -78,7 +78,7 @@ relative to the config file and may contain `$ENV_VARS`.
 | `models` | default parameters of each model, including its learning rates `eps_fc`, `eps_fs` |
 | `fitting` | `max_iter`, `tol`, `check_every`, `convergence` (`legacy` / `normalized` / `fc_fs_a` / `none`), `step_norm` (`none` / `rms`, default `none`), `log_every`, `n_init`, `seed`, `split_half` |
 | `sweep` | list of entries `{datasets, models, grid}`; each is the product datasets x models x grid. `grid` keys can be any model parameter, fitting setting or preprocessing option. `split_half: true` in an entry also fits odd and even epochs (3x the cost) |
-| `fdt_metrics` | optional, default `["integral"]`: the FDT measures of the downstream step and Study 3, `integral` (analytic integral violation) and / or `onsager` (Deco's Onsager formalism). A measure added later is computed into the existing downstream files; the others are kept |
+| `fdt_metrics` | optional, default `["integral"]`: the FDT measures of the downstream step and Study 3, `integral` (analytic integral violation), `onsager` (Deco's Onsager formalism) and / or `ivfdt` (stationary, variance-normalised IV-FDT of the lab's updated HCP pipeline: node I_tot and rho_brk). A measure added later is computed into the existing downstream files; the others are kept |
 | `study3` | optional: `lab_default` -> per model `{eps_fc, eps_fs}`, the lab's default learning rates, outlined in the Study 3 figures (a cell of the grid) and compared in Study 4 |
 
 ### Outputs
