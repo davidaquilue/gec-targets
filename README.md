@@ -16,6 +16,7 @@ violation). The four studies ask:
 | 2 | How does the fit evolve during training, and do FS_S / FS_A converge when the default rule stops? Which learning rates fit what? | `studies/study2_training_dynamics.py` |
 | 3 | How much do the learning rates move the downstream measures (analytical FDT violation, entropy production), do they keep the order of subjects, do the measures follow the fit or the data, and does HCP working memory vs rest hold on every grid cell? | `studies/study3_downstream.py` |
 | 4 | Does the updated fit (FS_S and FS_A errors scaled to the size of FC in the step, stopping rule on FC + FS_A only) fit FS_A better than the original at the lab default and at its best FS_A cell, at what cost to FC, and does it change the downstream measures and the HCP contrast? | `studies/study4_fitting_procedure.py` |
+| 5 | Does Gustavo Deco's Onsager-formalism FDT violation (`inv(A)`-based chi ratio, [`Compute_FDT_Violation_Onsager.m`](gectargets/onsager_fdt.py)) agree with the analytic integral violation of Study 3, per grid cell and on the sleep N3 vs wake contrast? | `studies/study5_onsager_fdt.py` |
 
 The methods (preprocessing, models, learning rule, metrics) are written out in
 [docs/methods.md](docs/methods.md).
@@ -43,10 +44,12 @@ python studies/study1_empirical_targets.py configs/fdt_datasets.json   # 3. anal
 python studies/study2_training_dynamics.py configs/fdt_datasets.json
 python studies/study3_downstream.py        configs/electrophysiology.json
 python studies/study4_fitting_procedure.py configs/electrophysiology.json
+python studies/study5_onsager_fdt.py       configs/fmri.json       # sleep N3 vs wake, Onsager FDT vs Study 3
 ```
 
-Figures and tables are written to `<results_root>/studies/study{1,2,3,4}/`;
-Studies 2 to 4 write one folder per model in theirs (`study2/<model>/`). The
+Figures and tables are written to `<results_root>/studies/study{1,2,3,4}/` and
+`study5_onsager/linear_hopf/`. Studies 2 to 5 write one folder per model in
+theirs (`study2/<model>/`). The
 study scripts are split into `# %%` cells: open them in PyCharm, VS Code or
 Jupyter (jupytext) to run them step by step.
 
@@ -85,6 +88,7 @@ relative to the config file and may contain `$ENV_VARS`.
 <results_root>/<dataset>/<variant>/fits/<model>/<tag>/<half>/downstream/<subject>.npz
 <results_root>/studies/study1/...
 <results_root>/studies/study{2,3,4}/<model>/...
+<results_root>/studies/study5_onsager/linear_hopf/...
 ```
 
 `variant` is the band plus `_env` / `_orth` (e.g. `alpha_env`, `nofilter`);
@@ -125,6 +129,10 @@ The downstream measures of Study 3 are one more array over the same task ids,
 once the fits are done (see the header of `hpc/downstream_array.sbatch`). The
 FDT costs O(n^3) per subject in the system size n (2N for linear_hopf): about
 10 s per subject at n = 800 (Schaefer400, linear_hopf).
+
+The study scripts can run there too: `hpc/studies.sbatch` is an array with
+one task per study (`--array=1-4`, or a subset), which can be chained after
+the downstream array with `--dependency=afterok:<job id>` (see its header).
 
 ### Fitting on a cluster, analysing elsewhere
 
