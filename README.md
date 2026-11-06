@@ -16,7 +16,7 @@ violation). The four studies ask:
 | 2 | How does the fit evolve during training, and do FS_S / FS_A converge when the default rule stops? Which learning rates fit what? | `studies/study2_training_dynamics.py` |
 | 3 | How much do the learning rates move the downstream measures (analytical FDT violation, entropy production), do they keep the order of subjects, do the measures follow the fit or the data, and does HCP working memory vs rest hold on every grid cell? | `studies/study3_downstream.py` |
 | 4 | Does the updated fit (FS_S and FS_A errors scaled to the size of FC in the step, stopping rule on FC + FS_A only) fit FS_A better than the original at the lab default and at its best FS_A cell, at what cost to FC, and does it change the downstream measures and the HCP contrast? | `studies/study4_fitting_procedure.py` |
-| 5 | Does Gustavo Deco's Onsager-formalism FDT violation (`inv(A)`-based chi ratio, [`Compute_FDT_Violation_Onsager.m`](gectargets/onsager_fdt.py)) agree with the analytic integral violation of Study 3, per grid cell and on the sleep N3 vs wake contrast? | `studies/study5_onsager_fdt.py` |
+| 5 | Does Gustavo Deco's Onsager-formalism FDT violation (`inv(A)`-based chi ratio, `Compute_FDT_Violation_Onsager.m`, ported in `gectargets/onsager_fdt.py`) agree with the analytic integral violation of Study 3, per grid cell and on the sleep N3 vs wake contrast? | `studies/study5_onsager_fdt.py` |
 
 The methods (preprocessing, models, learning rule, metrics) are written out in
 [docs/methods.md](docs/methods.md).

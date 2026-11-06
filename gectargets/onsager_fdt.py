@@ -12,7 +12,8 @@ Tomas Berjaga Buisan), same formula as ``neuronumba``'s
 where A is the (stable) Jacobian of the full state -- ``model.jacobian(C)``,
 already 2N x 2N for linear_hopf (the MATLAB code rebuilds it from Ceff via
 hopf_int; here it is read straight from the saved fit, which is the same
-matrix, see docs/methods.md) -- COV is its stationary covariance (A COV +
+matrix, see LinearHopf.jacobian in models.py) -- COV is its stationary
+covariance (A COV +
 COV A' = -sigma^2 I, ``models.stationary_cov``), and n is the number of
 observed nodes: the matrices are restricted to the n x n (x-x) block before
 averaging, as in the original, which only ever used the N x N Ceff block.

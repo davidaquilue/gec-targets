@@ -12,6 +12,12 @@
 # 2. the paired Sleep N3 vs wake contrast (Cohen's d_z, paired t-test), side
 #    by side for both measures, over the eps_fc x eps_fs grid.
 #
+# Caveat: for linear_hopf the Onsager measure grows with the node
+# frequencies (~f^2: the rotation terms of the Jacobian are irreversible by
+# themselves), while a GEC fitted from a symmetric SC moves it little.
+# Sleep_W and Sleep_N3 have their own `freqs_path`, so a W vs N3 difference
+# in this measure may come from the frequencies rather than the GEC.
+#
 # Cheap: both measures are read from the fits and downstream measures
 # already on disk (no refitting); the Onsager measure costs one inv() and
 # one Lyapunov solve per subject per cell (2N = 180 for AAL90).
@@ -33,7 +39,8 @@ from scipy.stats import spearmanr, ttest_rel
 from gectargets.config import expand_tasks, load_config, model_dir, study_dir
 from gectargets.downstream import load_downstream
 from gectargets.onsager_fdt import fdt_violation_onsager
-from gectargets.plotting import GRAY, dataset_label, figure_title, save
+from gectargets.plotting import (GRAY, dataset_label, figure_title,
+                                 model_label, save)
 from gectargets.results import load_fits, save_per_model
 
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fmri.json"
@@ -102,7 +109,7 @@ def spearman(a, b):
 
 agreement = pd.DataFrame([
     {"model": MODEL, "id": id_, "dataset": g.dataset.iloc[0],
-     "eps_fc": g.eps_fc.iloc[0], "eps_fs": g.eps_fs.iloc[0],
+     "variant": g.variant.iloc[0], "eps_fc": g.eps_fc.iloc[0], "eps_fs": g.eps_fs.iloc[0],
      "n_subjects": len(g),
      "spearman_integral_vs_onsager": spearman(g.fdt_integral, g.fdt_onsager)}
     for id_, g in data.groupby("id")])
@@ -112,28 +119,31 @@ with pd.option_context("display.width", 160, "display.precision", 3):
 
 # %% [markdown]
 # ## 3. Sleep N3 vs wake: does each measure agree on direction?
-# Cells are matched between the two datasets by `tag` (same hyperparameters,
-# same preprocessing settings), subjects by id (those with a stable fit in
-# both). Cohen's d_z and the paired t-test, for both measures, at every
-# matched cell.
+# Cells are matched between the two datasets by variant and `tag` (same
+# preprocessing, same hyperparameters; the tag alone leaves the
+# preprocessing out), subjects by id (those with a stable fit in both).
+# Cohen's d_z and the paired t-test, for both measures, at every matched
+# cell.
 
 # %%
 a_ds, b_ds = CONTRAST
-a_tasks = {t["tag"]: t for t in tasks if t["dataset"] == a_ds}
-b_tasks = {t["tag"]: t for t in tasks if t["dataset"] == b_ds}
-common_tags = sorted(set(a_tasks) & set(b_tasks))
-if not common_tags:
-    print(f"No matching {a_ds}/{b_ds} cells (same tag): nothing to contrast")
+a_tasks = {(t["variant"], t["tag"]): t for t in tasks if t["dataset"] == a_ds}
+b_tasks = {(t["variant"], t["tag"]): t for t in tasks if t["dataset"] == b_ds}
+common_cells = sorted(set(a_tasks) & set(b_tasks))
+if not common_cells:
+    print(f"No matching {a_ds}/{b_ds} cells (same variant and tag): nothing "
+          f"to contrast")
 
 contrast_rows = []
-for tag in common_tags:
-    u, t = a_tasks[tag], b_tasks[tag]
+for variant, tag in common_cells:
+    u, t = a_tasks[variant, tag], b_tasks[variant, tag]
     a = data[data.id == u["id"]].set_index("subject")
     b = data[data.id == t["id"]].set_index("subject")
     common = a.index.intersection(b.index)
     if len(common) < 3:
         continue
-    row = {"model": MODEL, "tag": tag, "eps_fc": t["swept"]["eps_fc"],
+    row = {"model": MODEL, "variant": variant, "tag": tag,
+           "eps_fc": t["swept"]["eps_fc"],
            "eps_fs": t["swept"]["eps_fs"], "n_subjects": len(common)}
     for m in ("fdt_integral", "fdt_onsager"):
         x, y = a.loc[common, m].to_numpy(), b.loc[common, m].to_numpy()
@@ -153,14 +163,16 @@ with pd.option_context("display.width", 200, "display.precision", 3):
 # negative) are where the two FDT measures point the same way.
 
 # %%
-if len(contrast):
+d_z = (contrast[["fdt_integral_d_z", "fdt_onsager_d_z"]].to_numpy(float)
+       if len(contrast) else np.empty((0, 2)))
+finite = np.isfinite(d_z)
+if finite.any():
     fig, ax = plt.subplots(figsize=(4.2, 4.2))
     ax.axhline(0, color=GRAY, linewidth=0.8)
     ax.axvline(0, color=GRAY, linewidth=0.8)
     ax.scatter(contrast.fdt_integral_d_z, contrast.fdt_onsager_d_z, s=24,
                color=GRAY, edgecolor="black", linewidth=0.4)
-    lim = 1.1 * np.nanmax(np.abs(contrast[["fdt_integral_d_z",
-                                           "fdt_onsager_d_z"]].to_numpy()))
+    lim = 1.1 * np.abs(d_z[finite]).max() or 1.0
     ax.plot([-lim, lim], [-lim, lim], color=GRAY, linewidth=0.6,
             linestyle=":")
     ax.set(xlim=(-lim, lim), ylim=(-lim, lim),
@@ -169,6 +181,6 @@ if len(contrast):
            ylabel=f"d_z, Onsager FDT ({dataset_label(a_ds)} - "
                  f"{dataset_label(b_ds)})")
     fig.tight_layout()
-    figure_title(fig, f"{MODEL}\nSleep N3 vs wake: do the two FDT measures "
-                      f"agree?")
+    figure_title(fig, f"{model_label(MODEL)}\nSleep N3 vs wake: do the two "
+                      f"FDT measures agree?")
     save(fig, model_dir(out, MODEL) / "4_agreement_d_z.png")
