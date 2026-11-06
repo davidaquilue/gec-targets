@@ -113,7 +113,7 @@
 
     {
       "_comment": "Updated fit (config.PROCEDURES 'updated': weighted step, FC + FS_A stopping rule): the Study 2 grid. Studies 2 and 3 show it as a model of its own (linear_hopf_updated); Study 4 compares it with the original fit.",
-      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR"],
+      "datasets": ["ADNI_Schaefer400", "HCP_RESTLR", "HCP_WMLR", "Sleep_W", "Sleep_N3"],
       "models": ["linear_hopf"],
       "grid": {
         "eps_fc": [1e-4, 5e-4, 0.001, 0.005, 0.01],
