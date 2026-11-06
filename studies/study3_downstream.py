@@ -2,12 +2,14 @@
 # # Study 3. Do the hyperparameters change the downstream measures?
 #
 # Study 2 asks how the learning rates change the fit; here, how they change
-# what is reported from a GEC: the analytical integral FDT violation of each
-# node (fdt_eeg's `pipeline_analytical_fdt_integral`) and the entropy
+# what is reported from a GEC: the FDT violation of each node and the entropy
 # production rate (EPR, fdt_eeg's `compute_entropy_production`; legacy and
-# network models only, not linear_hopf). See gectargets/downstream.py for how
-# they are called. On the eps_fc x eps_fs grid of each dataset, variant and
-# model:
+# network models only, not linear_hopf). The FDT measures shown are the
+# config's `fdt_metrics`: "integral" (fdt_eeg's
+# `pipeline_analytical_fdt_integral`) and / or "onsager" (Deco's Onsager
+# formalism, `gectargets/onsager_fdt.py`); each is a measure of its own in
+# every section. See gectargets/downstream.py for how they are called. On
+# the eps_fc x eps_fs grid of each dataset, variant and model:
 # 1. how much the mean EPR and the mean FDT violation move across the grid,
 # 2. whether different learning rates order the subjects the same way,
 # 3. whether the measures follow the fit (of FS_A) or the data (the empirical
@@ -44,7 +46,8 @@ from scipy.stats import (false_discovery_control, rankdata, spearmanr,
 from gectargets.analysis import asym, triu
 from gectargets.config import (expand_tasks, load_config, model_dir,
                                model_name, study_dir)
-from gectargets.downstream import load_downstream, panel_key, selected_cells
+from gectargets.downstream import (FDT_METRICS, fdt_metrics, load_downstream,
+                                   panel_key, selected_cells)
 from gectargets.plotting import (CORR, DIVERGING, GRAY, corr_norm,
                                  dataset_label, figure_title, heat_panel,
                                  model_label, outline_legend, save)
@@ -59,10 +62,15 @@ CELLS = {"lab_default": {"color": "#0b0b0b", "linestyle": "-",
                          "label": "lab default"},
          "best_fs_a": {"color": "#eda100", "linestyle": "--",
                        "label": "best FS_A fit"}}
-MEASURES = {"fdt": "mean FDT violation", "epr": "EPR"}  # no EPR: linear_hopf
+# Short names of the measures (keys of the downstream files)
+SHORT = {"fdt": "FDT", "fdt_onsager": "Onsager FDT", "epr": "EPR"}
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study3")
+# FDT measures shown: the config's fdt_metrics; no EPR for linear_hopf
+FDT = [FDT_METRICS[m] for m in fdt_metrics(cfg)]
+MEASURES = {**{m: f"mean {SHORT[m]} violation" for m in FDT}, "epr": "EPR"}
+MEAN = {m: f"mean {SHORT[m]}" if m in FDT else SHORT[m] for m in MEASURES}
 
 tasks, fits, down = [], {}, {}
 for t in expand_tasks(cfg):
@@ -109,7 +117,8 @@ def by_model(keys):
     return groups
 
 
-# One row per task and subject; node FDT per task (subjects x nodes)
+# One row per task and subject; node FDT per task and FDT measure
+# (subjects x nodes)
 frames, node_fdt = [], {}
 for t in tasks:
     f, d = fits[t["id"]], down[t["id"]]
@@ -119,10 +128,12 @@ for t in tasks:
         "model": model_name(t),
         X_PARAM: t["swept"][X_PARAM], Y_PARAM: t["swept"][Y_PARAM],
         "subject": d["subjects"], "stable": d["stable"].astype(bool),
-        "epr": d["epr"].astype(float), "fdt": d["fdt"].mean(axis=1),
+        "epr": d["epr"].astype(float),
+        **{m: d[m].mean(axis=1) for m in FDT},
         "r_fs_a": pd.Series(f["r_fs_a"], index=f["subjects"])
         .reindex(d["subjects"]).to_numpy(float)}))
-    node_fdt[t["id"]] = pd.DataFrame(d["fdt"], index=d["subjects"])
+    node_fdt[t["id"]] = {m: pd.DataFrame(d[m], index=d["subjects"])
+                         for m in FDT}
 data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 write(data, "downstream_per_subject.csv")
 n_unstable = int((~data.stable).sum()) if len(data) else 0
@@ -271,14 +282,19 @@ if len(level):
 # is harmless for between-subject analyses.
 
 # %%
-def node_pattern(ref_id, cell_id):
-    a, b = node_fdt[ref_id], node_fdt[cell_id]
+def node_pattern(ref_id, cell_id, m):
+    a, b = node_fdt[ref_id][m], node_fdt[cell_id][m]
     common = a.index.intersection(b.index)
     return mean_row_corr(a.loc[common].to_numpy(), b.loc[common].to_numpy())
 
 
-ORDER = {"fdt": "mean FDT order", "fdt_nodes": "FDT node pattern",
-         "epr": "EPR order"}
+# Column -> (measure, title): each measure's order, and the node pattern of
+# each FDT measure
+ORDER = {}
+for m in MEASURES:
+    ORDER[m] = (m, f"{MEAN[m]} order")
+    if m in FDT:
+        ORDER[f"{m}_nodes"] = (m, f"{SHORT[m]} node pattern")
 order_rows = []
 for key, group in by_panel.items():
     d = data[(data.panel == panel_name(key)) & data.stable]
@@ -295,7 +311,8 @@ for key, group in by_panel.items():
             for m, w in wide.items():
                 row[m] = (spearman(w[rt["id"]], w[t["id"]])
                           if rt["id"] in w and t["id"] in w else np.nan)
-            row["fdt_nodes"] = node_pattern(rt["id"], t["id"])
+            for m in FDT:
+                row[f"{m}_nodes"] = node_pattern(rt["id"], t["id"], m)
             order_rows.append(row)
 order = pd.DataFrame(order_rows)
 write(order, "2_subject_order.csv")
@@ -303,7 +320,7 @@ write(order, "2_subject_order.csv")
 if len(order):
     for model, keys in by_model(by_panel).items():
         cols = [(ref, o) for ref in model_cells(keys) for o in ORDER
-                if o == "fdt_nodes" or o in model_measures(model)]
+                if ORDER[o][0] in model_measures(model)]
         fig, axes = figure(len(keys), len(cols))
         for row, key in zip(axes, keys):
             for ax, (ref, o) in zip(row, cols):
@@ -312,7 +329,7 @@ if len(order):
                 if not len(g) or o not in g or g[o].isna().all():
                     continue
                 heat_panel(ax, grid_of(g, o), f"{panel_title(key)}\n"
-                           f"{ORDER[o]} vs {CELLS[ref]['label']}", *CORR,
+                           f"{ORDER[o][1]} vs {CELLS[ref]['label']}", *CORR,
                            ".2f", outlines=outlines(key))
         finish(fig, axes, model, keys, "2_subject_order.png")
 
@@ -393,20 +410,25 @@ for key, group in by_panel.items():  # key = data type; group = list of hyperpar
             row[f"{m}_median"] = dt[m].median()
             row[f"{m}_vs_fit"] = spearman(dt[m], dt.r_fs_a)  # corr metric with fit fs_A
             row[f"{m}_vs_data"] = spearman(dt[m], power.loc[dt.index])
-        sim = node_fdt[t["id"]].loc[dt.index]  # Set task index of FDT
-        row["fdt_nodes_vs_data"] = mean_row_corr(  # Corr fdt with fs_A**2 per nodes
-            sim.to_numpy(), nodes.loc[dt.index].to_numpy()
-        )
+        for m in FDT:
+            sim = node_fdt[t["id"]][m].loc[dt.index]  # Set task index of FDT
+            row[f"{m}_nodes_vs_data"] = mean_row_corr(  # Corr fdt with fs_A**2 per nodes
+                sim.to_numpy(), nodes.loc[dt.index].to_numpy()
+            )
         follow_rows.append(row)
 follow = pd.DataFrame(follow_rows)
 write(follow, "3_fit_vs_data.csv")
 
-FOLLOW = {"fdt_vs_fit": "mean FDT vs fit", "fdt_vs_data": "mean FDT vs data",
-          "fdt_nodes_vs_data": "FDT node pattern vs data",
-          "epr_vs_fit": "EPR vs fit", "epr_vs_data": "EPR vs data"}
+# Column -> (measure, title)
+FOLLOW = {}
+for m in MEASURES:
+    FOLLOW[f"{m}_vs_fit"] = (m, f"{MEAN[m]} vs fit")
+    FOLLOW[f"{m}_vs_data"] = (m, f"{MEAN[m]} vs data")
+    if m in FDT:
+        FOLLOW[f"{m}_nodes_vs_data"] = (m, f"{SHORT[m]} node pattern vs data")
 for model, keys in by_model(by_panel).items():
     ms = model_measures(model)
-    cols = [c for c in FOLLOW if c.split("_")[0] in ms]
+    cols = [c for c, (m, _) in FOLLOW.items() if m in ms]
     fig, axes = figure(len(keys), len(cols))
     for row, key in zip(axes, keys):
         g = follow[follow.panel == panel_name(key)]
@@ -414,7 +436,8 @@ for model, keys in by_model(by_panel).items():
             if col not in g or g[col].isna().all():
                 continue
             heat_panel(ax, grid_of(g, col), f"{panel_title(key)}\n"
-                       f"{FOLLOW[col]}", *CORR, ".2f", outlines=outlines(key))
+                       f"{FOLLOW[col][1]}", *CORR, ".2f",
+                       outlines=outlines(key))
     finish(fig, axes, model, keys, "3_fit_vs_data.png")
 
     fig, axes = figure(len(keys), len(ms))

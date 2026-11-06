@@ -178,6 +178,15 @@ are logged (`history_*` in the subject's `.npz`).
     defaults (tmax 100 s, ts 0, Gaussian V0 of SD 0.05, not thermalised). 0
     for a symmetric B. For linear_hopf B is the full 2N system and the N
     observed (x) nodes are kept;
+  * Onsager FDT violation of each node (`gectargets/onsager_fdt.py`, port of
+    Deco's `Compute_FDT_Violation_Onsager.m`): with `S` the stationary
+    covariance of the jacobian A (`A S + S A' = -sigma^2 I`),
+    `chi = |2 S / sigma^2 + inv(A)|`, `chi2 = |inv(A)|` and, for each
+    observed node j, `chij = mean_i chi_ij / mean_i chi2_ij` over the N x N
+    observed block. 0 for a symmetric A (equilibrium). For linear_hopf it
+    grows with the node frequencies (~f^2), irreversible by themselves;
+  * which FDT measures are computed and shown is the config's
+    `fdt_metrics` (`integral`, file key `fdt`; `onsager`, `fdt_onsager`);
   * EPR: `compute_entropy_production(B, compute_theoretical_covariance(B,
     sigma), sigma)`, equal to the Phi above; legacy and network only.
   Fits that are not stable (an eigenvalue of the jacobian with real part

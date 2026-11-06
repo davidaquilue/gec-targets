@@ -1,23 +1,41 @@
 """
-Downstream measures of the fitted GECs: the analytical integral FDT violation
-and the entropy production rate (EPR), computed from the saved fits (no
-refitting) with fdt_eeg's own functions (gectargets/fdt_eeg, verbatim
-copies), called as in fdt_eeg's
-studies/4c_analytical_GEC_features/step1_compute_gec_features.py:
+Downstream measures of the fitted GECs: the FDT violation of each node and
+the entropy production rate (EPR), computed from the saved fits (no
+refitting).
 
-    B   = -jacobian                     friction, dx/dt = -B x
-    fdt = pipeline_analytical_fdt_integral(B, sigma * ones, normalizations=False)
+Two FDT measures, chosen with ``fdt_metrics`` in the config (a list, default
+``["integral"]``); each is a key of the downstream files:
+
+``integral`` -> "fdt"
+    the analytical integral violation, with fdt_eeg's own functions
+    (gectargets/fdt_eeg, verbatim copies), called as in fdt_eeg's
+    studies/4c_analytical_GEC_features/step1_compute_gec_features.py:
+
+        B   = -jacobian                     friction, dx/dt = -B x
+        fdt = pipeline_analytical_fdt_integral(B, sigma * ones,
+                                               normalizations=False)
+
+    with the defaults of fdt_eeg (tmax 100 s, ts 0, Gaussian V0);
+    ``normalizations=False`` returns only the integral violation.
+``onsager`` -> "fdt_onsager"
+    Deco's Onsager-formalism violation, chij of
+    gectargets/onsager_fdt.fdt_violation_onsager(jacobian, sigma, N): the
+    chi ratio from inv(jacobian) and the stationary covariance.
+
+and, for legacy and network,
+
     S   = compute_theoretical_covariance(B, sigma)
     epr = compute_entropy_production(B, S, sigma)
 
-fdt is the integral violation of each node with the defaults of fdt_eeg (tmax
-100 s, ts 0, Gaussian V0); ``normalizations=False`` returns only that one, so
-the normalised variants are not computed. sigma is the fit's own (``sigma``
-of the fit file). For legacy and network -jacobian is the saved friction. For
-linear_hopf B is the full 2N x 2N system and the fdt of the N observed (x)
-nodes is kept; its EPR is not computed.
+sigma is the fit's own (``sigma`` of the fit file). For legacy and network
+-jacobian is the saved friction. For linear_hopf the full 2N x 2N system is
+used and the FDT of the N observed (x) nodes is kept; its EPR is not
+computed.
 
-Results: <fit_dir>/downstream/<subject>.npz, one per fitted subject.
+Results: <fit_dir>/downstream/<subject>.npz, one per fitted subject. A file
+that lacks a requested FDT measure gets it added, the measures already in it
+are kept: adding "onsager" to a config whose integral FDT is done only
+computes the Onsager one (cheap).
 """
 import numpy as np
 from joblib import Parallel, delayed, parallel_config
@@ -26,49 +44,94 @@ from .config import fit_dir, grid_settings, model_name
 from .fdt_eeg.analytic_fdt import pipeline_analytical_fdt_integral
 from .fdt_eeg.entropy import (compute_entropy_production,
                               compute_theoretical_covariance)
+from .onsager_fdt import fdt_violation_onsager
 from .results import is_complete, read_npz_files, save_npz
 
 EPR_MODELS = ("legacy", "network")
+# FDT measure (config "fdt_metrics") -> its key in the downstream files
+FDT_METRICS = {"integral": "fdt", "onsager": "fdt_onsager"}
 # A best cell needs at least this share of the grid's most subjects fitted:
 # a mean over the few subjects that survive a too large step is no best
 MIN_FITTED = 0.9
+
+
+def fdt_metrics(cfg):
+    """The config's FDT measures ("fdt_metrics", default ["integral"])."""
+    metrics = list(cfg.get("fdt_metrics", ["integral"]))
+    unknown = [m for m in metrics if m not in FDT_METRICS]
+    if unknown or not metrics:
+        raise ValueError(f"fdt_metrics {metrics}: give one or more of "
+                         f"{list(FDT_METRICS)}")
+    return metrics
 
 
 def downstream_dir(cfg, task):
     return fit_dir(cfg, task) / "downstream"
 
 
-def subject_downstream(fit_file, model, out_file):
-    """fdt (and EPR) of one subject's fit; saves one .npz."""
+def _saved_keys(path):
+    """Arrays in a downstream file; None if it is missing or truncated."""
+    if not is_complete(path):
+        return None
+    with np.load(path) as z:
+        return set(z.files)
+
+
+def subject_downstream(fit_file, model, out_file, metrics):
+    """The FDT measures *metrics* (and EPR) of one subject's fit; saves one
+    .npz. Measures already in out_file are kept, not recomputed."""
     with np.load(fit_file) as z:
         A, sigma, n = z["jacobian"], float(z["sigma"]), len(z["fc_sim"])
+    out = {}
+    if _saved_keys(out_file) is not None:
+        with np.load(out_file) as z:
+            out = {k: z[k] for k in z.files}
     B = -A
     stable = bool(np.all(np.linalg.eigvals(A).real < 0))
-    fdt, epr = np.full(n, np.nan), np.nan
-    if stable:
-        fdt = pipeline_analytical_fdt_integral(
-            B, sigma * np.ones(len(B)), normalizations=False)[:n]
-        if model in EPR_MODELS:
+    out["stable"] = stable
+    if "epr" not in out:
+        out["epr"] = np.nan
+        if stable and model in EPR_MODELS:
             S = compute_theoretical_covariance(B, sigma)
-            epr = compute_entropy_production(B, S, sigma)
-    save_npz(out_file, fdt=fdt, epr=epr, stable=stable)
+            out["epr"] = compute_entropy_production(B, S, sigma)
+    for metric in metrics:
+        key = FDT_METRICS[metric]
+        if key in out:
+            continue
+        out[key] = np.full(n, np.nan)
+        if not stable:
+            continue
+        if metric == "integral":
+            out[key] = pipeline_analytical_fdt_integral(
+                B, sigma * np.ones(len(B)), normalizations=False)[:n]
+        else:
+            out[key] = fdt_violation_onsager(A, sigma, n)[0]
+    save_npz(out_file, **out)
     return fit_file.stem, stable
 
 
 def run_downstream(cfg, task, n_jobs=1):
     """Downstream measures of every fitted subject of one task, in parallel;
-    finished subjects are skipped."""
+    subjects that have every measure of the config are skipped."""
+    metrics = fdt_metrics(cfg)
+    keys = {FDT_METRICS[m] for m in metrics}
     f_dir = fit_dir(cfg, task)
     fits = [p for p in sorted(f_dir.glob("*.npz")) if is_complete(p)]
     out_dir = downstream_dir(cfg, task)
     out_dir.mkdir(parents=True, exist_ok=True)
-    todo = [p for p in fits if not is_complete(out_dir / p.name)]
+    todo = []
+    for p in fits:
+        saved = _saved_keys(out_dir / p.name)
+        if saved is None or not keys <= saved:
+            todo.append(p)
     print(f"Task {task['id']}: {task['dataset']} / {task['variant']} / "
           f"{task['model']} / {task['tag']} / {task['half']}: "
-          f"{len(todo)} of {len(fits)} fitted subjects to do, {n_jobs} jobs")
+          f"{len(todo)} of {len(fits)} fitted subjects to do "
+          f"(FDT: {', '.join(metrics)}), {n_jobs} jobs")
     with parallel_config(backend="loky", inner_max_num_threads=1):
         results = Parallel(n_jobs=n_jobs, verbose=5)(
-            delayed(subject_downstream)(p, task["model"], out_dir / p.name)
+            delayed(subject_downstream)(p, task["model"], out_dir / p.name,
+                                        metrics)
             for p in todo)
     unstable = [s for s, ok in results if not ok]
     if unstable:
@@ -77,15 +140,22 @@ def run_downstream(cfg, task, n_jobs=1):
 
 
 def load_downstream(cfg, task):
-    """Downstream measures of one task: "fdt" (n_subjects, N), "epr",
-    "stable" (n_subjects,) and "subjects"; None if there are none."""
+    """Downstream measures of one task: every FDT key of FDT_METRICS ("fdt",
+    "fdt_onsager"; (n_subjects, N), NaN for the subjects whose file lacks
+    it), "epr", "stable" (n_subjects,) and "subjects"; None if there are
+    none."""
     files = sorted(downstream_dir(cfg, task).glob("*.npz"))
     loaded = [(p, z) for p, z in zip(files, read_npz_files(files))
               if z is not None]
     if not loaded:
         return None
-    out = {k: np.array([z[k] for _, z in loaded])
-           for k in ("fdt", "epr", "stable")}
+    n = next(len(z[k]) for _, z in loaded for k in FDT_METRICS.values()
+             if k in z)
+    out = {k: np.array([z[k] if k in z else np.full(n, np.nan)
+                        for _, z in loaded])
+           for k in FDT_METRICS.values()}
+    out.update({k: np.array([z[k] for _, z in loaded])
+                for k in ("epr", "stable")})
     out["subjects"] = [p.stem for p, _ in loaded]
     return out
 
