@@ -39,7 +39,8 @@ from gectargets.results import load_fits, load_targets, save_per_model
 CONFIG = sys.argv[1] if len(sys.argv) > 1 else "configs/fdt_datasets.json"
 X_PARAM, Y_PARAM = "eps_fs", "eps_fc"     # section 1: heatmap columns, rows
 MIN_EDGES = 10            # section 1b: fewest edges of a sign to correlate
-TRAJECTORY_TASKS = None   # task ids for section 2; None: the "none" runs
+TRAJECTORY_TASKS = None   # task ids for section 2; None: three cells of
+                          # each grid (see section 2)
 
 cfg = load_config(CONFIG)
 out = study_dir(cfg, "study2")
@@ -313,6 +314,12 @@ for model, ps in by_model(nmse_panels).items():
 # correlations. A subject that has stopped keeps its last value. The dashed
 # line is the median iteration where the default rule stops (computed from
 # the logged legacy error, also for runs with `convergence: "none"`).
+# One figure per dataset (and variant, model and other swept settings, as
+# the panels of section 1), with three tasks of its `X_PARAM` x `Y_PARAM`
+# grid as rows: highest `Y_PARAM` with lowest `X_PARAM`, the middle of both,
+# and lowest `Y_PARAM` with highest `X_PARAM` (a cell not fitted yet is
+# left out). With `TRAJECTORY_TASKS` set, those tasks instead, all of them,
+# grouped the same way.
 
 # %%
 def history_matrix(f, key):
@@ -343,16 +350,39 @@ def stop_iterations(t, f):
     return np.full(len(f["subjects"]), np.nan)  # other rules: not comparable
 
 
-selected = TRAJECTORY_TASKS or [t["id"] for t in tasks
-                                if t["fit"]["convergence"] == "none"] \
-    or [t["id"] for t in tasks[:4]]
-sel_tasks = {}
+def representative(group):
+    """Three fitted tasks of a grid: highest Y_PARAM with lowest X_PARAM,
+    the middle of both, lowest Y_PARAM with highest X_PARAM."""
+    xs = sorted({t["swept"][X_PARAM] for t in group})
+    ys = sorted({t["swept"][Y_PARAM] for t in group})
+    at = {(t["swept"][Y_PARAM], t["swept"][X_PARAM]): t for t in group}
+    cells = [(ys[-1], xs[0]), (ys[(len(ys) - 1) // 2], xs[(len(xs) - 1) // 2]),
+             (ys[0], xs[-1])]
+    return [at[c] for c in dict.fromkeys(cells) if c in at]
+
+
+def file_name(t):
+    """Figure file of a panel: dataset, variant and other swept settings."""
+    extra = grid_settings(t, (X_PARAM, Y_PARAM))
+    parts = [t["dataset"], t["variant"]] + settings(extra)
+    return "2_trajectories_" + "_".join(p.replace(" ", "") for p in parts) \
+        + ".png"
+
+
+# One figure per grid panel (dataset, variant, model and other settings),
+# also for runs with convergence "none" (left out of the grids of section 1)
+traj_groups = {}
 for t in tasks:
-    if t["id"] in selected:
-        sel_tasks.setdefault(model_name(t), []).append(t)
-for model, group in sel_tasks.items():
-    fig, axes = figure(len(group), len(TARGETS))
-    for row, t in zip(axes, group):
+    if TRAJECTORY_TASKS is not None and t["id"] not in TRAJECTORY_TASKS:
+        continue
+    if TRAJECTORY_TASKS is None and not (X_PARAM in t["swept"]
+                                         and Y_PARAM in t["swept"]):
+        continue
+    traj_groups.setdefault(panel_name(t), []).append(t)
+for group in traj_groups.values():
+    shown = group if TRAJECTORY_TASKS is not None else representative(group)
+    fig, axes = figure(len(shown), len(TARGETS))
+    for row, t in zip(axes, shown):
         f = fits[t["id"]]
         iters = history_matrix(f, "iter").max(axis=0)
         stops = stop_iterations(t, f)
@@ -364,10 +394,10 @@ for model, group in sel_tasks.items():
             if np.isfinite(stops).any():
                 ax.axvline(np.nanmedian(stops), color=GRAY, linestyle="--",
                            linewidth=1)
-            ax.set(title=f"{dataset_label(t['dataset'])} | task {t['id']}\n"
+            ax.set(title=f"{panel_title(t)} | task {t['id']}\n"
                          f"{key}: {', '.join(settings(t['swept']))}",
                    xlabel="iteration", ylabel="corr(emp, sim)")
-    finish(fig, model, "2_trajectories.png")
+    finish(fig, model_name(group[0]), file_name(group[0]))
 
 # %% [markdown]
 # ## 3. When the fit stops, have FC, FS, FS_S and FS_A stopped improving?
